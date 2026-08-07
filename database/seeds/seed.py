@@ -2,8 +2,13 @@ import json
 import os
 from database.connection import get_db_session
 from database.models import CandidateModel, JobDescriptionModel
+# Import your Base model and engine alongside CandidateModel
+from database.models import Base, CandidateModel  # adjust imports based on your file structure
+from database.connection import engine  # adjust path to where your SQLAlchemy engine is defined
 
 def seed_data():
+    # Automatically create missing database tables
+    Base.metadata.create_all(bind=engine)
     base_dir = os.path.dirname(os.path.abspath(__file__))
     candidates_path = os.path.join(base_dir, "candidates.json")
     
