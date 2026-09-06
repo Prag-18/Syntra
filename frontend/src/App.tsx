@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { Candidate, RankedCandidate, PipelinePhase, FeedbackDecision } from './types';
+import React, { useState, useEffect } from 'react';
+import { Candidate, RankedCandidate, PipelinePhase, FeedbackDecision, CandidateFeedbackSummary } from './types';
 import { SAMPLE_CANDIDATES, DEFAULT_JD } from './data/candidates';
-import { rankCandidates } from './lib/api';
+import { rankCandidates, submitFeedback, fetchFeedbackSummaries } from './lib/api';
 import { Sidebar } from './components/Sidebar';
 import { PhaseBar } from './components/PhaseBar';
 import { JobDescriptionCard } from './components/JobDescriptionCard';
@@ -17,6 +17,20 @@ export const App: React.FC = () => {
   const [rankings, setRankings] = useState<RankedCandidate[]>([]);
   const [duration, setDuration] = useState<number | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [feedbackSummaries, setFeedbackSummaries] = useState<Record<string, CandidateFeedbackSummary>>({});
+
+  useEffect(() => {
+    const loadSummaries = async () => {
+      const summaries = await fetchFeedbackSummaries();
+      const map: Record<string, CandidateFeedbackSummary> = {};
+      for (const s of summaries) {
+        if (s.candidate_id) map[s.candidate_id] = s;
+        if (s.external_id) map[s.external_id] = s;
+      }
+      setFeedbackSummaries(map);
+    };
+    loadSummaries();
+  }, []);
 
   const toggleCandidate = (id: string) => {
     setSelectedIds((prev) =>
@@ -44,8 +58,16 @@ export const App: React.FC = () => {
     setPhase('complete');
   };
 
-  const handleFeedback = (candidateId: string, decision: FeedbackDecision) => {
-    console.log(`Feedback saved: Candidate ${candidateId} -> ${decision}`);
+  const handleFeedback = async (candidateId: string, decision: FeedbackDecision) => {
+    const res = await submitFeedback(candidateId, decision);
+    if (res && res.summary) {
+      setFeedbackSummaries((prev) => ({
+        ...prev,
+        [candidateId]: res.summary,
+        ...(res.summary.external_id ? { [res.summary.external_id]: res.summary } : {}),
+        ...(res.summary.candidate_id ? { [res.summary.candidate_id]: res.summary } : {})
+      }));
+    }
   };
 
   return (
@@ -73,13 +95,19 @@ export const App: React.FC = () => {
           <CandidatePool
             candidates={candidates}
             selectedIds={selectedIds}
+            feedbackSummaries={feedbackSummaries}
             onToggle={toggleCandidate}
             onOpenAddModal={() => setIsAddModalOpen(true)}
           />
         </div>
 
         {phase === 'complete' && (
-          <ResultsList rankings={rankings} durationMs={duration} onFeedback={handleFeedback} />
+          <ResultsList
+            rankings={rankings}
+            durationMs={duration}
+            feedbackSummaries={feedbackSummaries}
+            onFeedback={handleFeedback}
+          />
         )}
 
         {isAddModalOpen && (
@@ -93,4 +121,4 @@ export const App: React.FC = () => {
   );
 };
 
-export default App;
+export default App;

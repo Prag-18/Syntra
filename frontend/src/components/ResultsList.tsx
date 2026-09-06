@@ -1,14 +1,15 @@
 import React from 'react';
-import { RankedCandidate, FeedbackDecision } from '../types';
+import { RankedCandidate, FeedbackDecision, CandidateFeedbackSummary } from '../types';
 import { ResultCard } from './ResultCard';
 
 interface Props {
   rankings: RankedCandidate[];
   durationMs: number | null;
-  onFeedback?: (candidateId: string, decision: FeedbackDecision) => void;
+  feedbackSummaries?: Record<string, CandidateFeedbackSummary>;
+  onFeedback?: (candidateId: string, decision: FeedbackDecision) => Promise<void> | void;
 }
 
-export const ResultsList: React.FC<Props> = ({ rankings, durationMs, onFeedback }) => {
+export const ResultsList: React.FC<Props> = ({ rankings, durationMs, feedbackSummaries = {}, onFeedback }) => {
   const topPicks = rankings.filter((r) => r.tier === 'Top pick').length;
   const worthInterviewing = rankings.filter((r) => r.tier === 'Worth interviewing').length;
 
@@ -38,8 +39,13 @@ export const ResultsList: React.FC<Props> = ({ rankings, durationMs, onFeedback 
       </div>
 
       {rankings.map((result) => (
-        <ResultCard key={result.id} result={result} onFeedback={onFeedback} />
+        <ResultCard
+          key={result.id}
+          result={result}
+          summary={feedbackSummaries[result.id]}
+          onFeedback={onFeedback}
+        />
       ))}
     </div>
   );
-};
+};

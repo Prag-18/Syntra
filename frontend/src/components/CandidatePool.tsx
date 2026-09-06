@@ -1,14 +1,15 @@
 import React from 'react';
-import { Candidate } from '../types';
+import { Candidate, CandidateFeedbackSummary } from '../types';
 
 interface Props {
   candidates: Candidate[];
   selectedIds: string[];
+  feedbackSummaries?: Record<string, CandidateFeedbackSummary>;
   onToggle: (id: string) => void;
   onOpenAddModal: () => void;
 }
 
-export const CandidatePool: React.FC<Props> = ({ candidates, selectedIds, onToggle, onOpenAddModal }) => {
+export const CandidatePool: React.FC<Props> = ({ candidates, selectedIds, feedbackSummaries = {}, onToggle, onOpenAddModal }) => {
   return (
     <div className="card">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
@@ -25,6 +26,8 @@ export const CandidatePool: React.FC<Props> = ({ candidates, selectedIds, onTogg
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '220px', overflowY: 'auto' }}>
         {candidates.map((c) => {
           const isSelected = selectedIds.includes(c.id);
+          const summary = feedbackSummaries[c.id];
+
           return (
             <div
               key={c.id}
@@ -41,7 +44,21 @@ export const CandidatePool: React.FC<Props> = ({ candidates, selectedIds, onTogg
               }}
             >
               <div>
-                <strong style={{ fontSize: '0.85rem' }}>{c.full_name}</strong>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <strong style={{ fontSize: '0.85rem' }}>{c.full_name}</strong>
+                  {summary && (summary.accepts > 0 || summary.maybes > 0 || summary.rejects > 0) && (
+                    <span style={{
+                      fontSize: '0.65rem',
+                      padding: '0.05rem 0.35rem',
+                      borderRadius: '4px',
+                      background: summary.accepts > 0 ? 'rgba(34, 197, 94, 0.15)' : summary.rejects > 0 ? 'rgba(239, 68, 68, 0.15)' : 'rgba(234, 179, 8, 0.15)',
+                      color: summary.accepts > 0 ? 'var(--accent-green)' : summary.rejects > 0 ? 'var(--accent-red)' : 'var(--accent-yellow)',
+                      border: `1px solid ${summary.accepts > 0 ? 'rgba(34, 197, 94, 0.3)' : summary.rejects > 0 ? 'rgba(239, 68, 68, 0.3)' : 'rgba(234, 179, 8, 0.3)'}`
+                    }}>
+                      {summary.accepts > 0 ? `✓ ${summary.accepts} prior accept` : summary.rejects > 0 ? `✕ ${summary.rejects} rejected` : `? ${summary.maybes} maybe`}
+                    </span>
+                  )}
+                </div>
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                   {c.current_role} @ {c.company} ({c.years_experience} yrs)
                 </p>
@@ -53,4 +70,4 @@ export const CandidatePool: React.FC<Props> = ({ candidates, selectedIds, onTogg
       </div>
     </div>
   );
-};
+};

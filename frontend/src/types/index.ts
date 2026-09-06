@@ -57,3 +57,24 @@ export interface ScoringWeights {
   domain: number;
   communication: number;
 }
+
+export interface CandidateFeedbackSummary {
+  candidate_id: string;
+  external_id?: string;
+  accepts: number;
+  maybes: number;
+  rejects: number;
+}
+
+export interface FeedbackResponse {
+  status: string;
+  feedback: {
+    id: string;
+    candidate_id: string;
+    run_id?: string | null;
+    decision: FeedbackDecision;
+    notes?: string;
+    created_at?: string;
+  };
+  summary: CandidateFeedbackSummary;
+}

@@ -1,4 +1,4 @@
-import { Candidate, RankedCandidate } from '../types';
+import { Candidate, RankedCandidate, FeedbackDecision, FeedbackResponse, CandidateFeedbackSummary } from '../types';
 import { enrichAndSort } from './scoring';
 
 const API_BASE = 'http://localhost:8000';
@@ -46,3 +46,57 @@ export async function rankCandidates(
     return { rankings, duration_ms };
   }
 }
+
+export async function submitFeedback(
+  candidateId: string,
+  decision: FeedbackDecision,
+  notes?: string,
+  runId?: string
+): Promise<FeedbackResponse> {
+  try {
+    const res = await fetch(`${API_BASE}/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        candidate_id: candidateId,
+        decision,
+        notes,
+        run_id: runId
+      })
+    });
+
+    if (!res.ok) throw new Error(`HTTP Error: ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.warn('Backend feedback endpoint unavailable. Using client fallback state.', err);
+    return {
+      status: 'success_offline',
+      feedback: {
+        id: `offline-${Date.now()}`,
+        candidate_id: candidateId,
+        run_id: runId || null,
+        decision,
+        notes: notes || '',
+        created_at: new Date().toISOString()
+      },
+      summary: {
+        candidate_id: candidateId,
+        external_id: candidateId,
+        accepts: decision === 'accept' ? 1 : 0,
+        maybes: decision === 'maybe' ? 1 : 0,
+        rejects: decision === 'reject' ? 1 : 0
+      }
+    };
+  }
+}
+
+export async function fetchFeedbackSummaries(): Promise<CandidateFeedbackSummary[]> {
+  try {
+    const res = await fetch(`${API_BASE}/feedback/summary`);
+    if (!res.ok) throw new Error(`HTTP Error: ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.warn('Backend feedback summary endpoint unavailable.', err);
+    return [];
+  }
+}
