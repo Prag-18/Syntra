@@ -1,3 +1,7 @@
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 import time
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,7 +25,7 @@ from core.candidate_profiler import profile_candidate
 from core.semantic_matcher import process_phase3
 from core.llm_ranker import run_llm_ranking
 
-app = FastAPI(title="TalentLens AI Engine")
+app = FastAPI(title="Syntra")
 
 app.add_middleware(
     CORSMiddleware,
