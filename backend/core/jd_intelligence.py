@@ -62,8 +62,14 @@ async def extract_role_intent(jd_text: str) -> RoleIntent:
         res.raise_for_status()
         data = res.json()
 
-        raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
-        parsed = json.loads(raw_text)
+        raw_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        if raw_text.startswith("```json"):
+            raw_text = raw_text[7:]
+        elif raw_text.startswith("```"):
+            raw_text = raw_text[3:]
+        if raw_text.endswith("```"):
+            raw_text = raw_text[:-3]
+        parsed = json.loads(raw_text.strip())
         
         weights = ScoringWeights(**parsed["weights"])
         return RoleIntent(

@@ -16,6 +16,7 @@ export const App: React.FC = () => {
   const [phase, setPhase] = useState<PipelinePhase>('idle');
   const [rankings, setRankings] = useState<RankedCandidate[]>([]);
   const [duration, setDuration] = useState<number | null>(null);
+  const [currentRunId, setCurrentRunId] = useState<string | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [feedbackSummaries, setFeedbackSummaries] = useState<Record<string, CandidateFeedbackSummary>>({});
 
@@ -55,11 +56,12 @@ export const App: React.FC = () => {
 
     setRankings(result.rankings);
     setDuration(result.duration_ms);
+    if (result.run_id) setCurrentRunId(result.run_id);
     setPhase('complete');
   };
 
   const handleFeedback = async (candidateId: string, decision: FeedbackDecision) => {
-    const res = await submitFeedback(candidateId, decision);
+    const res = await submitFeedback(candidateId, decision, undefined, currentRunId || undefined);
     if (res && res.summary) {
       setFeedbackSummaries((prev) => ({
         ...prev,

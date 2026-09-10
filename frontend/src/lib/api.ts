@@ -6,7 +6,7 @@ const API_BASE = 'http://localhost:8000';
 export async function rankCandidates(
   jdText: string,
   candidates: Candidate[]
-): Promise<{ rankings: RankedCandidate[]; duration_ms: number }> {
+): Promise<{ rankings: RankedCandidate[]; duration_ms: number; run_id?: string }> {
   try {
     const res = await fetch(`${API_BASE}/rank`, {
       method: 'POST',
@@ -16,7 +16,7 @@ export async function rankCandidates(
 
     if (!res.ok) throw new Error(`HTTP Error: ${res.status}`);
     const data = await res.json();
-    return { rankings: data.rankings, duration_ms: data.duration_ms };
+    return { rankings: data.rankings, duration_ms: data.duration_ms, run_id: data.run_id };
   } catch (err) {
     console.warn('Backend endpoint unavailable. Running client fallback calculation.', err);
     const start = performance.now();

@@ -64,6 +64,18 @@ class JobDescriptionModel(Base):
     status = Column(String(50), default="active")
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
 
+    def to_dict(self):
+        return {
+            "id": str(self.id),
+            "title": self.title,
+            "raw_text": self.raw_text,
+            "extracted_intent": self.extracted_intent,
+            "must_have_skills": self.must_have_skills or [],
+            "nice_to_have_skills": self.nice_to_have_skills or [],
+            "status": self.status,
+            "created_at": self.created_at.isoformat() if self.created_at else None
+        }
+
 class RankingRunModel(Base):
     __tablename__ = "ranking_runs"
     __table_args__ = (
@@ -112,6 +124,29 @@ class RankedResultModel(Base):
 
     run = relationship("RankingRunModel", backref="ranked_results")
     candidate = relationship("CandidateModel", backref="ranked_results")
+
+    def to_dict(self):
+        return {
+            "id": str(self.id),
+            "run_id": str(self.run_id),
+            "candidate_id": str(self.candidate_id),
+            "final_rank": self.final_rank,
+            "composite_score": float(self.composite_score) if self.composite_score is not None else None,
+            "tier": self.tier,
+            "headline": self.headline,
+            "rationale": self.rationale,
+            "key_strengths": self.key_strengths or [],
+            "key_risks": self.key_risks or [],
+            "interview_questions": self.interview_questions or [],
+            "dim_scores": {
+                "skills": float(self.dim_skills) if self.dim_skills is not None else 0.0,
+                "trajectory": float(self.dim_trajectory) if self.dim_trajectory is not None else 0.0,
+                "leadership": float(self.dim_leadership) if self.dim_leadership is not None else 0.0,
+                "domain": float(self.dim_domain) if self.dim_domain is not None else 0.0,
+                "communication": float(self.dim_communication) if self.dim_communication is not None else 0.0,
+            },
+            "created_at": self.created_at.isoformat() if self.created_at else None
+        }
 
 class RecruiterFeedbackModel(Base):
     __tablename__ = "recruiter_feedback"
