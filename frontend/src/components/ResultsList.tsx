@@ -7,9 +7,10 @@ interface Props {
   durationMs: number | null;
   feedbackSummaries?: Record<string, CandidateFeedbackSummary>;
   onFeedback?: (candidateId: string, decision: FeedbackDecision) => Promise<void> | void;
+  title?: string;
 }
 
-export const ResultsList: React.FC<Props> = ({ rankings, durationMs, feedbackSummaries = {}, onFeedback }) => {
+export const ResultsList: React.FC<Props> = ({ rankings, durationMs, feedbackSummaries = {}, onFeedback, title = 'Candidate Rankings' }) => {
   const topPicks = rankings.filter((r) => r.tier === 'Top pick').length;
   const worthInterviewing = rankings.filter((r) => r.tier === 'Worth interviewing').length;
 
@@ -26,7 +27,7 @@ export const ResultsList: React.FC<Props> = ({ rankings, durationMs, feedbackSum
         marginBottom: '1rem'
       }}>
         <div>
-          <h2 style={{ fontSize: '1.2rem', margin: 0 }}>Candidate Rankings</h2>
+          <h2 style={{ fontSize: '1.2rem', margin: 0 }}>{title}</h2>
           <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
             Evaluated: {rankings.length} | Top Picks: {topPicks} | Worth Interviewing: {worthInterviewing}
           </span>

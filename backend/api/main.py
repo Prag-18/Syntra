@@ -3,7 +3,7 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import time
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uuid
@@ -162,7 +162,111 @@ def get_all_feedback_summaries(run_id: Optional[str] = None, db: Session = Depen
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch feedback summary: {str(e)}")
 
+@app.get("/runs")
+def list_ranking_runs(
+    status: Optional[str] = Query(None, pattern="^(pending|running|complete|failed)$"),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db)
+):
+    try:
+        query = db.query(RankingRunModel).join(JobDescriptionModel, RankingRunModel.jd_id == JobDescriptionModel.id)
+        if status:
+            query = query.filter(RankingRunModel.status == status)
 
+        total = query.count()
+        runs_db = query.order_by(RankingRunModel.created_at.desc()).offset(offset).limit(limit).all()
+
+        runs_list = []
+        for r in runs_db:
+            jd = r.job_description
+            cand_count = 0
+            if r.phase3_scores and isinstance(r.phase3_scores, dict) and "candidate_count" in r.phase3_scores:
+                cand_count = r.phase3_scores["candidate_count"]
+            else:
+                cand_count = db.query(RankedResultModel).filter_by(run_id=r.id).count()
+
+            snippet = jd.raw_text[:120].strip() if jd and jd.raw_text else ""
+            if jd and jd.raw_text and len(jd.raw_text) > 120:
+                snippet += "..."
+
+            runs_list.append({
+                "run_id": str(r.id),
+                "jd_id": str(r.jd_id),
+                "title": jd.title if jd else "Untitled Role",
+                "jd_snippet": snippet,
+                "status": r.status,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "duration_ms": r.duration_ms,
+                "candidate_count": cand_count
+            })
+
+        return {
+            "runs": runs_list,
+            "total": total,
+            "limit": limit,
+            "offset": offset
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch runs: {str(e)}")
+
+@app.get("/runs/{run_id}")
+def get_ranking_run_detail(run_id: str, db: Session = Depends(get_db)):
+    try:
+        run_uuid = uuid.UUID(run_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=422, detail=f"Invalid UUID format for run_id: '{run_id}'")
+
+    run = db.query(RankingRunModel).filter_by(id=run_uuid).first()
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Ranking run not found with id: '{run_id}'")
+
+    jd = run.job_description
+    results_db = (
+        db.query(RankedResultModel, CandidateModel)
+        .join(CandidateModel, RankedResultModel.candidate_id == CandidateModel.id)
+        .filter(RankedResultModel.run_id == run_uuid)
+        .order_by(RankedResultModel.final_rank.asc())
+        .all()
+    )
+
+    rankings = []
+    for res_row, cand in results_db:
+        dim_scores = {
+            "skills": float(res_row.dim_skills) if res_row.dim_skills is not None else 0.0,
+            "trajectory": float(res_row.dim_trajectory) if res_row.dim_trajectory is not None else 0.0,
+            "leadership": float(res_row.dim_leadership) if res_row.dim_leadership is not None else 0.0,
+            "domain": float(res_row.dim_domain) if res_row.dim_domain is not None else 0.0,
+            "communication": float(res_row.dim_communication) if res_row.dim_communication is not None else 0.0,
+        }
+
+        rankings.append({
+            "id": cand.external_id or str(cand.id),
+            "candidate_id": str(cand.id),
+            "external_id": cand.external_id,
+            "rank": res_row.final_rank,
+            "full_name": cand.full_name,
+            "composite_score": float(res_row.composite_score) if res_row.composite_score is not None else 0.0,
+            "tier": res_row.tier,
+            "headline": res_row.headline or f"{cand.current_role} at {cand.company}",
+            "rationale": res_row.rationale or "",
+            "key_strengths": res_row.key_strengths or [],
+            "key_risks": res_row.key_risks or [],
+            "interview_questions": res_row.interview_questions or [],
+            "dim_scores": dim_scores
+        })
+
+    return {
+        "run": {
+            "id": str(run.id),
+            "status": run.status,
+            "duration_ms": run.duration_ms,
+            "created_at": run.created_at.isoformat() if run.created_at else None,
+            "job_description": jd.to_dict() if jd else None,
+            "phase3_scores": run.phase3_scores,
+            "rankings": rankings
+        }
+    }
 
 from dataclasses import asdict
 

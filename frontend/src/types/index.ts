@@ -77,4 +77,56 @@ export interface FeedbackResponse {
     created_at?: string;
   };
   summary: CandidateFeedbackSummary;
-}
+}
+
+export type RunStatus = 'pending' | 'running' | 'complete' | 'failed';
+
+export interface RankingRunSummary {
+  run_id: string;
+  jd_id: string;
+  title: string;
+  jd_snippet: string;
+  status: RunStatus;
+  created_at: string;
+  duration_ms: number | null;
+  candidate_count: number;
+}
+
+export interface RunsListResponse {
+  runs: RankingRunSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface JobDescriptionDetail {
+  id: string;
+  title: string;
+  raw_text: string;
+  extracted_intent?: {
+    must_have_skills?: string[];
+    nice_to_have_skills?: string[];
+    implicit_requirements?: string[];
+    culture_signals?: string[];
+    seniority_level?: string;
+    leadership_required?: boolean;
+    communication_bar?: string;
+    weights?: ScoringWeights;
+  } | null;
+  must_have_skills?: string[];
+  nice_to_have_skills?: string[];
+  status?: string;
+  created_at?: string;
+}
+
+export interface RankingRunDetail {
+  id: string;
+  status: RunStatus;
+  duration_ms: number | null;
+  created_at: string;
+  job_description: JobDescriptionDetail | null;
+  phase3_scores?: Record<string, any>;
+  rankings: RankedCandidate[];
+}
+
+export type ActiveTab = 'dashboard' | 'history';

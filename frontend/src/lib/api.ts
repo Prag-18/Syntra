@@ -90,13 +90,48 @@ export async function submitFeedback(
   }
 }
 
-export async function fetchFeedbackSummaries(): Promise<CandidateFeedbackSummary[]> {
+export async function fetchFeedbackSummaries(runId?: string): Promise<CandidateFeedbackSummary[]> {
   try {
-    const res = await fetch(`${API_BASE}/feedback/summary`);
+    const url = runId
+      ? `${API_BASE}/feedback/summary?run_id=${encodeURIComponent(runId)}`
+      : `${API_BASE}/feedback/summary`;
+    const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP Error: ${res.status}`);
     return await res.json();
   } catch (err) {
     console.warn('Backend feedback summary endpoint unavailable.', err);
     return [];
+  }
+}
+
+export async function fetchRuns(
+  status?: string,
+  limit: number = 20,
+  offset: number = 0
+): Promise<{ runs: import('../types').RankingRunSummary[]; total: number; limit: number; offset: number }> {
+  try {
+    const params = new URLSearchParams();
+    if (status && status !== 'all') params.append('status', status);
+    params.append('limit', String(limit));
+    params.append('offset', String(offset));
+
+    const res = await fetch(`${API_BASE}/runs?${params.toString()}`);
+    if (!res.ok) throw new Error(`HTTP Error: ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.warn('Backend runs endpoint unavailable.', err);
+    return { runs: [], total: 0, limit, offset };
+  }
+}
+
+export async function fetchRunDetail(runId: string): Promise<import('../types').RankingRunDetail | null> {
+  try {
+    const res = await fetch(`${API_BASE}/runs/${encodeURIComponent(runId)}`);
+    if (!res.ok) throw new Error(`HTTP Error: ${res.status}`);
+    const data = await res.json();
+    return data.run;
+  } catch (err) {
+    console.warn(`Backend run detail endpoint failed for run_id: ${runId}`, err);
+    return null;
   }
 }

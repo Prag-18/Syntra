@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Candidate, RankedCandidate, PipelinePhase, FeedbackDecision, CandidateFeedbackSummary } from './types';
+import { Candidate, RankedCandidate, PipelinePhase, FeedbackDecision, CandidateFeedbackSummary, ActiveTab } from './types';
 import { SAMPLE_CANDIDATES, DEFAULT_JD } from './data/candidates';
 import { rankCandidates, submitFeedback, fetchFeedbackSummaries } from './lib/api';
 import { Sidebar } from './components/Sidebar';
@@ -8,8 +8,10 @@ import { JobDescriptionCard } from './components/JobDescriptionCard';
 import { CandidatePool } from './components/CandidatePool';
 import { ResultsList } from './components/ResultsList';
 import { CustomCandidateForm } from './components/CustomCandidateForm';
+import { HistoryView } from './components/HistoryView';
 
 export const App: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [jdText, setJdText] = useState(DEFAULT_JD);
   const [candidates, setCandidates] = useState<Candidate[]>(SAMPLE_CANDIDATES);
   const [selectedIds, setSelectedIds] = useState<string[]>(SAMPLE_CANDIDATES.map((c) => c.id));
@@ -72,51 +74,66 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleLoadJdToLive = (text: string) => {
+    setJdText(text);
+    setActiveTab('dashboard');
+  };
+
   return (
     <div className="app-container">
-      <Sidebar activePhase={phase} />
+      <Sidebar
+        activePhase={phase}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+      />
 
       <main className="main-content">
-        <header style={{ marginBottom: '1.5rem' }}>
-          <h1 style={{ fontSize: '1.8rem', fontWeight: 'bold' }}>Candidate Ranking Dashboard</h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-            Evaluate candidates against role intent using multi-dimension scoring and LLM analysis.
-          </p>
-        </header>
+        {activeTab === 'dashboard' ? (
+          <>
+            <header style={{ marginBottom: '1.5rem' }}>
+              <h1 style={{ fontSize: '1.8rem', fontWeight: 'bold' }}>Candidate Ranking Dashboard</h1>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                Evaluate candidates against role intent using multi-dimension scoring and LLM analysis.
+              </p>
+            </header>
 
-        <PhaseBar phase={phase} />
+            <PhaseBar phase={phase} />
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
-          <JobDescriptionCard
-            jdText={jdText}
-            onChange={setJdText}
-            onRun={handleRunPipeline}
-            isLoading={phase !== 'idle' && phase !== 'complete'}
-          />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+              <JobDescriptionCard
+                jdText={jdText}
+                onChange={setJdText}
+                onRun={handleRunPipeline}
+                isLoading={phase !== 'idle' && phase !== 'complete'}
+              />
 
-          <CandidatePool
-            candidates={candidates}
-            selectedIds={selectedIds}
-            feedbackSummaries={feedbackSummaries}
-            onToggle={toggleCandidate}
-            onOpenAddModal={() => setIsAddModalOpen(true)}
-          />
-        </div>
+              <CandidatePool
+                candidates={candidates}
+                selectedIds={selectedIds}
+                feedbackSummaries={feedbackSummaries}
+                onToggle={toggleCandidate}
+                onOpenAddModal={() => setIsAddModalOpen(true)}
+              />
+            </div>
 
-        {phase === 'complete' && (
-          <ResultsList
-            rankings={rankings}
-            durationMs={duration}
-            feedbackSummaries={feedbackSummaries}
-            onFeedback={handleFeedback}
-          />
-        )}
+            {phase === 'complete' && (
+              <ResultsList
+                rankings={rankings}
+                durationMs={duration}
+                feedbackSummaries={feedbackSummaries}
+                onFeedback={handleFeedback}
+              />
+            )}
 
-        {isAddModalOpen && (
-          <CustomCandidateForm
-            onAdd={handleAddCandidate}
-            onClose={() => setIsAddModalOpen(false)}
-          />
+            {isAddModalOpen && (
+              <CustomCandidateForm
+                onAdd={handleAddCandidate}
+                onClose={() => setIsAddModalOpen(false)}
+              />
+            )}
+          </>
+        ) : (
+          <HistoryView onLoadJdToLive={handleLoadJdToLive} />
         )}
       </main>
     </div>
