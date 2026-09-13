@@ -1,51 +1,58 @@
 # Syntra — AI Candidate Ranking Engine
 
-Syntra is an AI-powered talent intelligence and candidate ranking platform that evaluates, profiles, and ranks candidate pools against job descriptions. Built with **FastAPI**, **React + TypeScript**, **PostgreSQL**, and **Google Gemini**, Syntra delivers transparent scoring, deep rationales, risk analysis, interview question generation, and real-time recruiter feedback loops.
+Syntra is an AI-powered talent intelligence and candidate ranking platform that evaluates, profiles, and ranks candidate pools against job descriptions. Built with **FastAPI**, **React + TypeScript**, **PostgreSQL**, and **Google Gemini**, Syntra delivers transparent scoring, deep rationales, risk analysis, interview question generation, persistent run histories, and real-time recruiter feedback loops.
 
 ---
 
 ## ⚡ Key Features
 
 - **4-Phase Ranking Pipeline**: Combines deterministic multi-dimensional signal profiling with semantic scoring and LLM holistic re-ranking.
-- **JD Intent Intelligence**: Uses Gemini to parse job descriptions into structured requirements (must-haves, nice-to-haves, seniority, domain, soft signals).
-- **5-Dimensional Profiling**: Evaluates candidates across **Skills**, **Trajectory**, **Leadership**, **Domain Relevance**, and **Communication**.
+- **JD Intent Intelligence**: Uses Gemini AI to parse job descriptions into structured requirements (must-haves, nice-to-haves, seniority, domain, soft signals).
+- **5-Dimensional Candidate Profiling**: Evaluates candidates across **Skills**, **Trajectory**, **Leadership**, **Domain Relevance**, and **Communication**.
 - **Transparent & Explainable AI**: Generates comprehensive match rationales, identified risks/red flags, and tailored technical interview questions.
-- **Recruiter Feedback Loop**: Enables hiring teams to tag decisions (`accept`, `maybe`, `reject`), log notes, and track historical recruiter sentiment.
+- **Recruiter Feedback Loop**: Enables hiring teams to tag decisions (`accept`, `maybe`, `reject`), log review notes, and track historical recruiter sentiment across runs.
+- **Ranking Run History & Audit Trail**: Full historical ranking records stored in PostgreSQL with filtering by status (`pending`, `running`, `complete`, `failed`), candidate count, latency metrics, and one-click JD reuse in the live dashboard.
 - **Custom Candidate Simulation**: Add and test custom candidate profiles dynamically directly from the interactive frontend dashboard.
-- **Responsive Dashboard**: Dark-mode React dashboard with real-time pipeline status indicators, dimension grids, and signal badges.
+- **Modern Dark-Mode Dashboard**: Sleek React UI with tabbed navigation (Live Dashboard & History View), real-time pipeline status progression, dimension grids, and signal badges.
 
 ---
 
 ## 🏗️ Architecture & Pipeline
 
 ```text
-┌─────────────────────────────────────────────────────────────┐
-│                 React + TypeScript Dashboard                │
-│                 (Vite, Tailwind/Vanilla CSS)                │
-└──────────────────────────────┬──────────────────────────────┘
-                               │  POST /rank
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                      FastAPI Backend                        │
-├─────────────────────────────────────────────────────────────┤
-│  Phase 1: JD Intelligence (core/jd_intelligence.py)         │
-│  - Extracts role intent, must-haves, seniority & signals    │
-│                                                             │
-│  Phase 2: Candidate Profiling (core/candidate_profiler.py)  │
-│  - Heuristic scoring across 5 key dimensions                │
-│                                                             │
-│  Phase 3: Semantic Matcher (core/semantic_matcher.py)       │
-│  - Weighted composite match score & top-10 candidate filter │
-│                                                             │
-│  Phase 4: Holistic LLM Ranker (core/llm_ranker.py)          │
-│  - Gemini LLM re-ranking, risk flags & interview questions  │
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    PostgreSQL Database                      │
-│     - Candidates, Job Descriptions, Runs & Feedback Logs    │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        React + TypeScript Dashboard                         │
+│             (Live Dashboard, Run History Inspector, Feedback UI)            │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │  HTTP / REST
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                               FastAPI Backend                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  Phase 1: JD Intelligence (core/jd_intelligence.py)                         │
+│  - Extracts role intent, must-haves, nice-to-haves, seniority & signals     │
+│                                                                             │
+│  Phase 2: Candidate Profiling (core/candidate_profiler.py)                  │
+│  - Heuristic scoring across 5 key dimensions (0-100)                        │
+│                                                                             │
+│  Phase 3: Semantic Matcher (core/semantic_matcher.py)                       │
+│  - Weighted composite match score & top-10 candidate shortlisting          │
+│                                                                             │
+│  Phase 4: Holistic LLM Ranker (core/llm_ranker.py)                          │
+│  - Gemini LLM re-ranking, risk flags, synthesis & interview questions       │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            PostgreSQL Database                              │
+│                                                                             │
+│  - candidates         : Candidate profiles, signals & background metrics    │
+│  - job_descriptions   : Raw text, parsed intent, must/nice-to-have skills   │
+│  - ranking_runs       : Execution status, phase 3 snapshots, duration (ms)  │
+│  - ranked_results     : Final ranks, composite scores, dimensional scores,  │
+│                         rationales, risks, and interview questions          │
+│  - recruiter_feedback : Recruiter decision tags (accept/maybe/reject)       │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -64,12 +71,39 @@ Candidates are evaluated across five core pillars before final LLM synthesis:
 
 ---
 
+## 🗄️ Database Schema & Entities
+
+The PostgreSQL schema is structured for full relational integrity and auditability:
+
+```text
+candidates (id, external_id, full_name, current_role, company, years_experience, skills, ...)
+    │
+    ├─────────────┬─────────────────────────────────────────────────┐
+    │             │                                                 │
+    ▼             ▼                                                 ▼
+job_descriptions ───► ranking_runs ───────────────► ranked_results ───► recruiter_feedback
+(id, raw_text,        (id, jd_id, status,          (id, run_id,         (id, run_id,
+ extracted_intent,     phase3_scores,               candidate_id,        candidate_id,
+ must_have_skills,     duration_ms,                 final_rank,          decision,
+ nice_to_have_skills)  created_at)                  composite_score,     notes,
+                                                    dim_scores, ...)     created_at)
+```
+
+- **`candidates`**: Master candidate pool with skill arrays, experience, and qualitative signal attributes.
+- **`job_descriptions`**: Persisted job descriptions with extracted intent and required skill taxonomies.
+- **`ranking_runs`**: Tracks pipeline execution lifecycle (`pending` ➔ `running` ➔ `complete` / `failed`), duration, and phase 3 score snapshots.
+- **`ranked_results`**: Individual candidate scores per run, including final rank, composite score, tier (`Top pick`, `Worth interviewing`, `Not recommended`), 5D breakdown, strengths, risks, and interview questions.
+- **`recruiter_feedback`**: Decision logs (`accept`, `maybe`, `reject`) linked to candidates and runs with optional notes.
+
+---
+
 ## 🛠️ Tech Stack
 
-- **Frontend**: React 18, TypeScript, Vite, Vanilla CSS design system
+- **Frontend**: React 18, TypeScript, Vite, CSS Variables & Design System
 - **Backend**: Python 3.10+, FastAPI, Uvicorn, SQLAlchemy 2.0, Pydantic v2, HTTPX
 - **Database**: PostgreSQL with `psycopg2-binary`
-- **AI / LLM**: Google Gemini REST API (`gemini-2.5-flash`)
+- **AI / LLM**: Google Gemini REST API (`gemini-3.6-flash` / `gemini-2.5-flash`)
+- **Testing**: `pytest`, `httpx`, `pytest-asyncio`
 
 ---
 
@@ -88,21 +122,24 @@ Syntra/
 │   │   ├── candidate_profiler.py  # Phase 2: 5-dimension scoring
 │   │   ├── semantic_matcher.py    # Phase 3: Composite ranking & shortlisting
 │   │   └── llm_ranker.py          # Phase 4: Gemini LLM re-ranking & questions
-│   └── database/                  # SQLAlchemy ORM layer & seeds
-│       ├── __init__.py
-│       ├── connection.py          # Database engine and session handlers
-│       ├── models.py              # Schema models (Candidates, Runs, Feedback)
-│       ├── schema.sql             # Raw SQL schema definition
-│       └── seeds/                 # Seed data and population script
-│           ├── candidates.json    # Default candidate dataset & sample JD
-│           └── seed.py            # Database seeder
+│   ├── database/                  # SQLAlchemy ORM layer & seeds
+│   │   ├── __init__.py
+│   │   ├── connection.py          # Database engine and session handlers
+│   │   ├── models.py              # Schema models (Candidates, Runs, Feedback)
+│   │   ├── schema.sql             # Raw SQL schema definition
+│   │   └── seeds/                 # Seed data and population script
+│   │       ├── candidates.json    # Default candidate dataset & sample JD
+│   │       └── seed.py            # Database seeder
+│   └── tests/                     # Automated backend test suite
+│       ├── test_history_endpoints.py # Run history and feedback tests
+│       └── test_rank_persistence.py  # Pipeline execution & persistence tests
 ├── frontend/                      # React + TypeScript web application
 │   ├── src/
-│   │   ├── components/            # UI components (ResultCard, FeedbackRow, etc.)
+│   │   ├── components/            # UI components (ResultCard, HistoryView, etc.)
 │   │   ├── data/                  # Default fallback candidates & JDs
 │   │   ├── lib/                   # API client helper functions
 │   │   ├── types/                 # TypeScript interfaces
-│   │   ├── App.tsx                # Main application view
+│   │   ├── App.tsx                # Main application view (Tabs & State)
 │   │   ├── index.css              # Global styles & design tokens
 │   │   └── main.tsx               # App entry point
 │   ├── index.html
@@ -141,6 +178,9 @@ Configure the environment variables in `.env`:
 # Google Gemini API Key
 GEMINI_API_KEY=your_gemini_api_key_here
 
+# Gemini Model (optional, defaults to gemini-3.6-flash)
+GEMINI_MODEL=gemini-3.6-flash
+
 # PostgreSQL connection string
 DATABASE_URL=postgresql://postgres:your_password@localhost:5432/syntra
 ```
@@ -149,7 +189,7 @@ DATABASE_URL=postgresql://postgres:your_password@localhost:5432/syntra
 
 ### 2. Backend Setup
 
-1. **Install dependencies:**
+1. **Install Python dependencies:**
 
    ```bash
    pip install -r requirements.txt
@@ -160,18 +200,13 @@ DATABASE_URL=postgresql://postgres:your_password@localhost:5432/syntra
    Make sure your PostgreSQL server is running and the database specified in `DATABASE_URL` (e.g., `syntra`) exists, then execute the seeder:
 
    ```bash
-   cd backend
-   python -m database.seeds.seed
+   python -m backend.database.seeds.seed
    ```
+   *(or run `cd backend && python -m database.seeds.seed`)*
 
 3. **Start the FastAPI backend server:**
 
-   From the `backend` directory:
-   ```bash
-   uvicorn api.main:app --reload --port 8000
-   ```
-
-   Or from the root directory:
+   From the root directory:
    ```bash
    uvicorn backend.api.main:app --reload --port 8000
    ```
@@ -207,7 +242,13 @@ DATABASE_URL=postgresql://postgres:your_password@localhost:5432/syntra
 ### Health Check
 - **`GET /`**
   - Verifies service status and database connection.
-  - **Response**: `{"status": "online", "database": "connected"}`
+  - **Response**:
+    ```json
+    {
+      "status": "online",
+      "database": "connected"
+    }
+    ```
 
 ### Candidates
 - **`GET /candidates`**
@@ -215,7 +256,7 @@ DATABASE_URL=postgresql://postgres:your_password@localhost:5432/syntra
 
 ### Parse Job Description
 - **`POST /jd/parse`**
-  - Extracts structured role requirements using Gemini AI.
+  - Extracts structured role requirements and skills using Gemini AI.
   - **Payload**:
     ```json
     {
@@ -225,7 +266,7 @@ DATABASE_URL=postgresql://postgres:your_password@localhost:5432/syntra
 
 ### Run Candidate Ranking
 - **`POST /rank`**
-  - Executes the full 4-phase AI ranking pipeline on provided or database candidates.
+  - Executes the full 4-phase AI ranking pipeline, records a `RankingRun`, and persists all `RankedResult` records.
   - **Payload**:
     ```json
     {
@@ -233,32 +274,114 @@ DATABASE_URL=postgresql://postgres:your_password@localhost:5432/syntra
       "candidates": [] 
     }
     ```
-  - *Note: If `candidates` is omitted or empty, candidates are automatically fetched from PostgreSQL.*
+  - *Note: If `candidates` is omitted or empty, active candidates are automatically loaded from PostgreSQL.*
+  - **Response**:
+    ```json
+    {
+      "status": "success",
+      "run_id": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+      "duration_ms": 2840,
+      "intent": { ... },
+      "rankings": [
+        {
+          "id": "cand_001",
+          "rank": 1,
+          "full_name": "Sarah Chen",
+          "composite_score": 94.5,
+          "tier": "Top pick",
+          "headline": "Lead Systems Engineer at Stripe",
+          "rationale": "Exceptional match for high-throughput distributed transaction engines...",
+          "key_strengths": ["Distributed Systems", "Kafka", "High Throughput"],
+          "key_risks": [],
+          "interview_questions": [
+            "How did you design partition rebalancing in your Kafka pipeline?"
+          ],
+          "dim_scores": {
+            "skills": 95,
+            "trajectory": 92,
+            "leadership": 90,
+            "domain": 98,
+            "communication": 92
+          }
+        }
+      ]
+    }
+    ```
+
+### Ranking Run History
+- **`GET /runs`**
+  - Returns paginated ranking runs with optional status filtering.
+  - **Query Parameters**:
+    - `status` (*optional*): `pending` | `running` | `complete` | `failed`
+    - `limit` (*default: 20, max: 100*)
+    - `offset` (*default: 0*)
+  - **Response**:
+    ```json
+    {
+      "runs": [
+        {
+          "run_id": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+          "jd_id": "c8f23b20-67c4-4b53-832f-a9b0c20efb1a",
+          "title": "Senior Staff Backend Engineer",
+          "jd_snippet": "We are looking for a Senior Staff Backend Engineer to lead...",
+          "status": "complete",
+          "created_at": "2026-09-13T18:30:00Z",
+          "duration_ms": 2840,
+          "candidate_count": 8
+        }
+      ],
+      "total": 12,
+      "limit": 20,
+      "offset": 0
+    }
+    ```
+
+- **`GET /runs/{run_id}`**
+  - Returns complete ranking run details including job description metadata and all ranked candidates with dimensional scores, strengths, risks, and interview questions.
 
 ### Recruiter Feedback
 - **`POST /feedback`**
-  - Records recruiter decisions (`accept`, `maybe`, `reject`) and review notes.
+  - Records recruiter evaluation tags (`accept`, `maybe`, `reject`) and review notes.
   - **Payload**:
     ```json
     {
       "candidate_id": "cand_001",
       "decision": "accept",
+      "run_id": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
       "notes": "Strong distributed systems background, recommended for technical screen."
     }
     ```
 - **`GET /feedback/summary`**
-  - Fetches aggregated recruiter sentiment metrics across all candidates.
+  - Fetches aggregated recruiter sentiment metrics across candidates (with optional `run_id` query parameter).
 
 ---
 
-## 🧪 Development & Testing
+## 🧪 Testing & Quality Assurance
 
-- **Backend Linting / Formatting**: Use standard Python linters (`flake8`, `black`, or `ruff`).
-- **Frontend Typecheck & Build**:
-  ```bash
-  cd frontend
-  npm run build
-  ```
+### Running Backend Tests
+
+Run all unit and integration tests with `pytest`:
+
+```bash
+pytest backend/tests
+```
+
+Or run individual test modules:
+
+```bash
+# Run run history & inspection endpoint tests
+pytest backend/tests/test_history_endpoints.py
+
+# Run ranking persistence & pipeline tests
+pytest backend/tests/test_rank_persistence.py
+```
+
+### Frontend Typechecking & Production Build
+
+```bash
+cd frontend
+npm run build
+```
 
 ---
 
