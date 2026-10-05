@@ -22,6 +22,7 @@ CREATE TABLE candidates (
     github_stars INT DEFAULT 0,
     linkedin_endorsements INT DEFAULT 0,
     source VARCHAR(100) DEFAULT 'direct',
+    needs_assessment BOOLEAN DEFAULT FALSE,
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP

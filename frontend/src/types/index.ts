@@ -19,9 +19,10 @@ export interface Candidate {
   collaboration_signals?: string;
   public_presence?: string;
   referral_notes?: string;
-  system_design_score?: number;
-  coding_score?: number;
-  communication_score?: number;
+  system_design_score?: number | null;
+  coding_score?: number | null;
+  communication_score?: number | null;
+  needs_assessment?: boolean;
 }
 
 export interface EnrichedCandidate extends Candidate {
@@ -44,6 +45,7 @@ export interface RankedCandidate {
   key_risks: string[];
   interview_questions: string[];
   dim_scores: DimScores;
+  needs_assessment?: boolean;
 }
 
 export type PipelinePhase = 'idle' | 'jd_analysis' | 'profiling' | 'matching' | 'llm_ranking' | 'complete';

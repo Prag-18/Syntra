@@ -49,12 +49,18 @@ export function enrichAndSort(
   weights: ScoringWeights = { skills: 0.3, trajectory: 0.2, leadership: 0.2, domain: 0.15, communication: 0.15 }
 ): EnrichedCandidate[] {
   const enriched = candidates.map(c => {
+    const domainScore = scoreDomain(c);
+    const hasNullScores = Boolean(c.needs_assessment) || (c.system_design_score == null && c.coding_score == null);
+    const skillsScore = hasNullScores
+      ? domainScore
+      : ((c.system_design_score ?? 70) + (c.coding_score ?? 70)) / 2;
+
     const dim_scores: DimScores = {
-      skills: ((c.system_design_score || 70) + (c.coding_score || 70)) / 2,
+      skills: skillsScore,
       trajectory: scoreTrajectory(c.current_role, c.years_experience, c.bio),
       leadership: scoreLeadership(c.mentoring_signals, c.bio, c.public_presence),
-      domain: scoreDomain(c),
-      communication: scoreCommunication(c.communication_score, c.communication_signals, c.public_presence)
+      domain: domainScore,
+      communication: scoreCommunication(c.communication_score ?? 70, c.communication_signals, c.public_presence)
     };
 
     const composite_score = Number((

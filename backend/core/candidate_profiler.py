@@ -59,13 +59,25 @@ def calculate_domain_depth(skills: list, bio: str, company: str, role: str, targ
 def profile_candidate(cand_dict: dict, target_keywords: list = None) -> dict:
     t_score = calculate_trajectory(cand_dict.get("current_role", ""), cand_dict.get("years_experience", 0), cand_dict.get("bio", ""))
     l_score = calculate_leadership(cand_dict.get("mentoring_signals", ""), cand_dict.get("bio", ""), cand_dict.get("public_presence", ""))
-    c_score = calculate_communication(cand_dict.get("communication_score", 70), cand_dict.get("communication_signals", ""), cand_dict.get("public_presence", ""))
+    c_score = calculate_communication(cand_dict.get("communication_score") or 70, cand_dict.get("communication_signals", ""), cand_dict.get("public_presence", ""))
     d_score = calculate_domain_depth(cand_dict.get("skills", []), cand_dict.get("bio", ""), cand_dict.get("company", ""), cand_dict.get("current_role", ""), target_keywords)
     
-    # Skills score uses technical assessment blend
-    sys_score = cand_dict.get("system_design_score") or 70
-    coding_score = cand_dict.get("coding_score") or 70
-    s_score = (sys_score + coding_score) / 2.0
+    # FAIRNESS GUARD FOR UNASSESSED CANDIDATES (RESUME UPLOAD):
+    # If a candidate was added via resume upload (needs_assessment=True) or has no recorded technical scores
+    # (system_design_score is None and coding_score is None), we use domain_depth (d_score) as a proxy
+    # for the Skills dimension score. This prevents resume-only candidates from being silently penalized
+    # or misranked compared to candidates with completed coding/system design assessments.
+    # Note: Explicit numeric scores (including 0 from a failed test) are preserved and calculated as (sys + coding) / 2.0.
+    sys_score = cand_dict.get("system_design_score")
+    coding_score = cand_dict.get("coding_score")
+    needs_assessment = bool(cand_dict.get("needs_assessment", False))
+
+    if needs_assessment or (sys_score is None and coding_score is None):
+        s_score = d_score
+    else:
+        sys_val = 70.0 if sys_score is None else float(sys_score)
+        coding_val = 70.0 if coding_score is None else float(coding_score)
+        s_score = (sys_val + coding_val) / 2.0
 
     return {
         **cand_dict,

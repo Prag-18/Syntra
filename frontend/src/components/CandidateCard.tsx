@@ -18,7 +18,22 @@ export const CandidateCard: React.FC<Props> = ({ candidate, isSelected, onSelect
         background: isSelected ? 'var(--bg-card-hover)' : 'var(--bg-card)'
       }}
     >
-      <h4>{candidate.full_name}</h4>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <h4>{candidate.full_name}</h4>
+        {candidate.needs_assessment && (
+          <span style={{
+            fontSize: '0.65rem',
+            padding: '0.1rem 0.35rem',
+            borderRadius: '3px',
+            background: 'rgba(245, 158, 11, 0.15)',
+            color: '#fcd34d',
+            border: '1px solid rgba(245, 158, 11, 0.4)',
+            whiteSpace: 'nowrap'
+          }}>
+            ⚠ Pending Assessment
+          </span>
+        )}
+      </div>
       <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
         {candidate.current_role} • {candidate.company}
       </p>

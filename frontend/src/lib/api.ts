@@ -3,6 +3,38 @@ import { enrichAndSort } from './scoring';
 
 const API_BASE = 'http://localhost:8000';
 
+export async function uploadResume(file: File): Promise<Candidate> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const res = await fetch(`${API_BASE}/candidates/upload`, {
+    method: 'POST',
+    body: formData
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({ detail: `Upload failed with status ${res.status}` }));
+    throw new Error(errorData.detail || `Upload failed with status ${res.status}`);
+  }
+
+  return await res.json();
+}
+
+export async function updateCandidate(id: string, updates: Partial<Candidate>): Promise<Candidate> {
+  const res = await fetch(`${API_BASE}/candidates/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates)
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({ detail: `Update failed with status ${res.status}` }));
+    throw new Error(errorData.detail || `Update failed with status ${res.status}`);
+  }
+
+  return await res.json();
+}
+
 export async function rankCandidates(
   jdText: string,
   candidates: Candidate[]

@@ -3,7 +3,9 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import time
-from fastapi import FastAPI, Depends, HTTPException, Query
+import logging
+from datetime import datetime
+from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uuid
@@ -24,6 +26,15 @@ from core.jd_intelligence import extract_role_intent
 from core.candidate_profiler import profile_candidate
 from core.semantic_matcher import process_phase3
 from core.llm_ranker import run_llm_ranking
+from core.resume_parser import (
+    extract_text_from_pdf,
+    extract_text_from_docx,
+    extract_candidate_from_resume,
+    ResumeParseError,
+    GeminiServiceError
+)
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Syntra")
 
@@ -48,6 +59,23 @@ class FeedbackCreateRequest(BaseModel):
     run_id: Optional[str] = None
     notes: Optional[str] = None
 
+class CandidateUpdateRequest(BaseModel):
+    full_name: Optional[str] = None
+    current_role: Optional[str] = None
+    company: Optional[str] = None
+    years_experience: Optional[int] = None
+    skills: Optional[List[str]] = None
+    bio: Optional[str] = None
+    mentoring_signals: Optional[str] = None
+    communication_signals: Optional[str] = None
+    collaboration_signals: Optional[str] = None
+    public_presence: Optional[str] = None
+    referral_notes: Optional[str] = None
+    system_design_score: Optional[int] = None
+    coding_score: Optional[int] = None
+    communication_score: Optional[int] = None
+    needs_assessment: Optional[bool] = None
+
 def get_candidate_feedback_summary(db: Session, candidate_id: uuid.UUID) -> dict:
     feedback_rows = db.query(RecruiterFeedbackModel).filter_by(candidate_id=candidate_id).all()
     accepts = sum(1 for f in feedback_rows if f.decision == "accept")
@@ -69,6 +97,123 @@ def health_check():
 def get_candidates(db: Session = Depends(get_db)):
     cands = db.query(CandidateModel).filter_by(is_active=True).all()
     return [c.to_dict() for c in cands]
+
+@app.post("/candidates/upload")
+async def upload_candidate_resume(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    MAX_SIZE = 5 * 1024 * 1024  # 5MB limit
+    filename = file.filename or ""
+    filename_lower = filename.lower()
+
+    if not (filename_lower.endswith(".pdf") or filename_lower.endswith(".docx")):
+        raise HTTPException(
+            status_code=422,
+            detail="Invalid file format. Only PDF (.pdf) and Word (.docx) files are supported."
+        )
+
+    content_type = file.content_type or ""
+    allowed_types = [
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/octet-stream"
+    ]
+    if content_type and content_type not in allowed_types:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid MIME type '{content_type}'. Only PDF and DOCX files are allowed."
+        )
+
+    file_bytes = await file.read()
+    if len(file_bytes) > MAX_SIZE:
+        raise HTTPException(
+            status_code=422,
+            detail="File size exceeds the 5MB limit. Please upload a smaller file."
+        )
+
+    if len(file_bytes) == 0:
+        raise HTTPException(
+            status_code=422,
+            detail="Uploaded file is empty."
+        )
+
+    # 1. Text extraction
+    try:
+        if filename_lower.endswith(".pdf"):
+            raw_text = extract_text_from_pdf(file_bytes)
+        else:
+            raw_text = extract_text_from_docx(file_bytes)
+    except ResumeParseError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.message)
+    except Exception as e:
+        logger.error(f"Unexpected error during resume text extraction: {type(e).__name__}")
+        raise HTTPException(status_code=422, detail="Failed to extract text from uploaded file.")
+
+    # 2. Gemini Structured Extraction
+    try:
+        extracted = await extract_candidate_from_resume(raw_text)
+    except GeminiServiceError as e:
+        logger.error(f"Resume extraction failed: {e.message}")
+        raise HTTPException(status_code=e.status_code, detail=e.message)
+    except Exception as e:
+        logger.error(f"Unexpected error during Gemini extraction: {type(e).__name__}")
+        raise HTTPException(status_code=502, detail="Resume extraction service encountered an error.")
+
+    # 3. DB Insertion
+    cand = CandidateModel(
+        full_name=extracted.get("full_name", "Unknown Candidate"),
+        current_role=extracted.get("current_role", "Candidate"),
+        company=extracted.get("company", "Independent"),
+        years_experience=extracted.get("years_experience", 0),
+        skills=extracted.get("skills", []),
+        bio=extracted.get("bio", ""),
+        mentoring_signals=extracted.get("mentoring_signals", ""),
+        communication_signals=extracted.get("communication_signals", ""),
+        collaboration_signals=extracted.get("collaboration_signals", ""),
+        public_presence=extracted.get("public_presence", ""),
+        referral_notes=extracted.get("referral_notes", ""),
+        system_design_score=None,
+        coding_score=None,
+        communication_score=None,
+        source="resume_upload",
+        needs_assessment=True
+    )
+    db.add(cand)
+    db.commit()
+    db.refresh(cand)
+
+    logger.info(f"Resume upload successful. Created candidate_id={cand.id}")
+    return cand.to_dict()
+
+@app.put("/candidates/{candidate_id}")
+def update_candidate(
+    candidate_id: str,
+    req: CandidateUpdateRequest,
+    db: Session = Depends(get_db)
+):
+    cand = None
+    try:
+        cand_uuid = uuid.UUID(candidate_id)
+        cand = db.query(CandidateModel).filter_by(id=cand_uuid).first()
+    except (ValueError, TypeError):
+        pass
+
+    if not cand:
+        cand = db.query(CandidateModel).filter_by(external_id=candidate_id).first()
+
+    if not cand:
+        raise HTTPException(status_code=404, detail=f"Candidate not found: '{candidate_id}'")
+
+    update_data = req.dict(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(cand, key, value)
+
+    cand.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(cand)
+
+    return cand.to_dict()
 
 @app.post("/feedback")
 def submit_feedback(req: FeedbackCreateRequest, db: Session = Depends(get_db)):
@@ -253,7 +398,8 @@ def get_ranking_run_detail(run_id: str, db: Session = Depends(get_db)):
             "key_strengths": res_row.key_strengths or [],
             "key_risks": res_row.key_risks or [],
             "interview_questions": res_row.interview_questions or [],
-            "dim_scores": dim_scores
+            "dim_scores": dim_scores,
+            "needs_assessment": cand.needs_assessment if cand.needs_assessment is not None else False
         })
 
     return {
@@ -436,6 +582,9 @@ async def rank_candidates(req: RankRequest, db: Session = Depends(get_db)):
             if not cand_model:
                 cand_model = _resolve_or_create_candidate(db, item)
                 candidate_db_map[item_id] = cand_model
+
+            if cand_model and cand_model.needs_assessment:
+                item["needs_assessment"] = True
 
             dim_scores = item.get("dim_scores") or {}
             result_row = RankedResultModel(

@@ -28,6 +28,7 @@ class CandidateModel(Base):
     github_stars = Column(Integer, default=0)
     linkedin_endorsements = Column(Integer, default=0)
     source = Column(String(100), default="direct")
+    needs_assessment = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow)
@@ -49,7 +50,8 @@ class CandidateModel(Base):
             "referral_notes": self.referral_notes or "",
             "system_design_score": self.system_design_score,
             "coding_score": self.coding_score,
-            "communication_score": self.communication_score
+            "communication_score": self.communication_score,
+            "needs_assessment": self.needs_assessment if self.needs_assessment is not None else False
         }
 
 class JobDescriptionModel(Base):

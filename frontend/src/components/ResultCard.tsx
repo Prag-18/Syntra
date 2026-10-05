@@ -38,8 +38,20 @@ export const ResultCard: React.FC<Props> = ({ result, summary, onFeedback }) => 
             {getInitials(result.full_name)}
           </div>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
               <span style={{ fontWeight: 'bold', fontSize: '1.1rem' }}>#{result.rank} {result.full_name}</span>
+              {result.needs_assessment && (
+                <span style={{
+                  fontSize: '0.65rem',
+                  padding: '0.1rem 0.35rem',
+                  borderRadius: '4px',
+                  background: 'rgba(245, 158, 11, 0.15)',
+                  color: '#fcd34d',
+                  border: '1px solid rgba(245, 158, 11, 0.4)'
+                }}>
+                  ⚠ Pending Assessment
+                </span>
+              )}
               {summary && (summary.accepts > 0 || summary.maybes > 0 || summary.rejects > 0) && (
                 <span style={{
                   fontSize: '0.65rem',
