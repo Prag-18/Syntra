@@ -7,9 +7,17 @@ interface Props {
   feedbackSummaries?: Record<string, CandidateFeedbackSummary>;
   onToggle: (id: string) => void;
   onOpenAddModal: () => void;
+  onRecordAssessment?: (candidate: Candidate) => void;
 }
 
-export const CandidatePool: React.FC<Props> = ({ candidates, selectedIds, feedbackSummaries = {}, onToggle, onOpenAddModal }) => {
+export const CandidatePool: React.FC<Props> = ({
+  candidates,
+  selectedIds,
+  feedbackSummaries = {},
+  onToggle,
+  onOpenAddModal,
+  onRecordAssessment
+}) => {
   return (
     <div className="card">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
@@ -44,8 +52,28 @@ export const CandidatePool: React.FC<Props> = ({ candidates, selectedIds, feedba
               }}
             >
               <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                   <strong style={{ fontSize: '0.85rem' }}>{c.full_name}</strong>
+                  {c.needs_assessment && (
+                    <span
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (onRecordAssessment) onRecordAssessment(c);
+                      }}
+                      style={{
+                        fontSize: '0.65rem',
+                        padding: '0.05rem 0.35rem',
+                        borderRadius: '4px',
+                        background: 'rgba(245, 158, 11, 0.15)',
+                        color: '#fcd34d',
+                        border: '1px solid rgba(245, 158, 11, 0.4)',
+                        cursor: 'pointer'
+                      }}
+                      title="Click to record assessment scores"
+                    >
+                      ⚠ Pending Assessment (Record)
+                    </span>
+                  )}
                   {summary && (summary.accepts > 0 || summary.maybes > 0 || summary.rejects > 0) && (
                     <span style={{
                       fontSize: '0.65rem',
@@ -70,4 +98,4 @@ export const CandidatePool: React.FC<Props> = ({ candidates, selectedIds, feedba
       </div>
     </div>
   );
-};
+};

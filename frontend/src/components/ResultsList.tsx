@@ -7,10 +7,18 @@ interface Props {
   durationMs: number | null;
   feedbackSummaries?: Record<string, CandidateFeedbackSummary>;
   onFeedback?: (candidateId: string, decision: FeedbackDecision) => Promise<void> | void;
+  onRecordAssessment?: (result: RankedCandidate) => void;
   title?: string;
 }
 
-export const ResultsList: React.FC<Props> = ({ rankings, durationMs, feedbackSummaries = {}, onFeedback, title = 'Candidate Rankings' }) => {
+export const ResultsList: React.FC<Props> = ({
+  rankings,
+  durationMs,
+  feedbackSummaries = {},
+  onFeedback,
+  onRecordAssessment,
+  title = 'Candidate Rankings'
+}) => {
   const topPicks = rankings.filter((r) => r.tier === 'Top pick').length;
   const worthInterviewing = rankings.filter((r) => r.tier === 'Worth interviewing').length;
 
@@ -45,8 +53,9 @@ export const ResultsList: React.FC<Props> = ({ rankings, durationMs, feedbackSum
           result={result}
           summary={feedbackSummaries[result.id]}
           onFeedback={onFeedback}
+          onRecordAssessment={onRecordAssessment}
         />
       ))}
     </div>
   );
-};
+};

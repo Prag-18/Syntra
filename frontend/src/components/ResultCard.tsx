@@ -9,9 +9,10 @@ interface Props {
   result: RankedCandidate;
   summary?: CandidateFeedbackSummary;
   onFeedback?: (id: string, decision: FeedbackDecision) => Promise<void> | void;
+  onRecordAssessment?: (result: RankedCandidate) => void;
 }
 
-export const ResultCard: React.FC<Props> = ({ result, summary, onFeedback }) => {
+export const ResultCard: React.FC<Props> = ({ result, summary, onFeedback, onRecordAssessment }) => {
   const getBadgeClass = (tier: string) => {
     if (tier === 'Top pick') return 'badge-top';
     if (tier === 'Worth interviewing') return 'badge-mid';
@@ -41,15 +42,23 @@ export const ResultCard: React.FC<Props> = ({ result, summary, onFeedback }) => 
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
               <span style={{ fontWeight: 'bold', fontSize: '1.1rem' }}>#{result.rank} {result.full_name}</span>
               {result.needs_assessment && (
-                <span style={{
-                  fontSize: '0.65rem',
-                  padding: '0.1rem 0.35rem',
-                  borderRadius: '4px',
-                  background: 'rgba(245, 158, 11, 0.15)',
-                  color: '#fcd34d',
-                  border: '1px solid rgba(245, 158, 11, 0.4)'
-                }}>
-                  ⚠ Pending Assessment
+                <span
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onRecordAssessment) onRecordAssessment(result);
+                  }}
+                  style={{
+                    fontSize: '0.65rem',
+                    padding: '0.1rem 0.35rem',
+                    borderRadius: '4px',
+                    background: 'rgba(245, 158, 11, 0.15)',
+                    color: '#fcd34d',
+                    border: '1px solid rgba(245, 158, 11, 0.4)',
+                    cursor: 'pointer'
+                  }}
+                  title="Click to record assessment scores"
+                >
+                  ⚠ Pending Assessment (Record)
                 </span>
               )}
               {summary && (summary.accepts > 0 || summary.maybes > 0 || summary.rejects > 0) && (

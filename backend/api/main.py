@@ -186,6 +186,20 @@ async def upload_candidate_resume(
     logger.info(f"Resume upload successful. Created candidate_id={cand.id}")
     return cand.to_dict()
 
+def _validate_score_value(score_val, field_name: str):
+    if score_val is None:
+        return None
+    try:
+        val = float(score_val)
+        if not (0 <= val <= 100):
+            raise ValueError()
+        return int(val) if val.is_integer() else val
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid score for '{field_name}': must be a number between 0 and 100 or null."
+        )
+
 @app.put("/candidates/{candidate_id}")
 def update_candidate(
     candidate_id: str,
@@ -206,13 +220,30 @@ def update_candidate(
         raise HTTPException(status_code=404, detail=f"Candidate not found: '{candidate_id}'")
 
     update_data = req.dict(exclude_unset=True)
+
+    if "system_design_score" in update_data:
+        cand.system_design_score = _validate_score_value(update_data["system_design_score"], "system_design_score")
+    if "coding_score" in update_data:
+        cand.coding_score = _validate_score_value(update_data["coding_score"], "coding_score")
+    if "communication_score" in update_data:
+        cand.communication_score = _validate_score_value(update_data["communication_score"], "communication_score")
+
     for key, value in update_data.items():
+        if key in ["system_design_score", "coding_score", "communication_score", "needs_assessment"]:
+            continue
         setattr(cand, key, value)
+
+    # Server-derived needs_assessment flag (never trust client value)
+    if cand.system_design_score is not None and cand.coding_score is not None:
+        cand.needs_assessment = False
+    else:
+        cand.needs_assessment = True
 
     cand.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(cand)
 
+    logger.info(f"Updated candidate_id={cand.id}, needs_assessment={cand.needs_assessment}")
     return cand.to_dict()
 
 @app.post("/feedback")

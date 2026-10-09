@@ -20,6 +20,7 @@ export const App: React.FC = () => {
   const [duration, setDuration] = useState<number | null>(null);
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [editingCandidate, setEditingCandidate] = useState<Candidate | null>(null);
   const [feedbackSummaries, setFeedbackSummaries] = useState<Record<string, CandidateFeedbackSummary>>({});
 
   useEffect(() => {
@@ -41,9 +42,37 @@ export const App: React.FC = () => {
     );
   };
 
-  const handleAddCandidate = (newCand: Candidate) => {
-    setCandidates((prev) => [newCand, ...prev]);
-    setSelectedIds((prev) => [...prev, newCand.id]);
+  const handleOpenRecordAssessment = (candOrResult: Candidate | RankedCandidate) => {
+    const target = candidates.find((c) => c.id === candOrResult.id) || (candOrResult as Candidate);
+    setEditingCandidate(target);
+    setIsAddModalOpen(true);
+  };
+
+  const handleSaveCandidate = (savedCand: Candidate) => {
+    setCandidates((prev) => {
+      const exists = prev.some((c) => c.id === savedCand.id);
+      if (exists) {
+        return prev.map((c) => (c.id === savedCand.id ? savedCand : c));
+      }
+      return [savedCand, ...prev];
+    });
+
+    setSelectedIds((prev) => (prev.includes(savedCand.id) ? prev : [...prev, savedCand.id]));
+
+    // Update rankings state so Pending Assessment badge disappears without page reload
+    setRankings((prev) =>
+      prev.map((r) =>
+        r.id === savedCand.id || (r as any).candidate_id === savedCand.id
+          ? {
+              ...r,
+              full_name: savedCand.full_name,
+              needs_assessment: savedCand.needs_assessment
+            }
+          : r
+      )
+    );
+
+    setEditingCandidate(null);
   };
 
   const handleRunPipeline = async () => {
@@ -112,7 +141,11 @@ export const App: React.FC = () => {
                 selectedIds={selectedIds}
                 feedbackSummaries={feedbackSummaries}
                 onToggle={toggleCandidate}
-                onOpenAddModal={() => setIsAddModalOpen(true)}
+                onOpenAddModal={() => {
+                  setEditingCandidate(null);
+                  setIsAddModalOpen(true);
+                }}
+                onRecordAssessment={handleOpenRecordAssessment}
               />
             </div>
 
@@ -122,13 +155,18 @@ export const App: React.FC = () => {
                 durationMs={duration}
                 feedbackSummaries={feedbackSummaries}
                 onFeedback={handleFeedback}
+                onRecordAssessment={handleOpenRecordAssessment}
               />
             )}
 
             {isAddModalOpen && (
               <CustomCandidateForm
-                onAdd={handleAddCandidate}
-                onClose={() => setIsAddModalOpen(false)}
+                onAdd={handleSaveCandidate}
+                editingCandidate={editingCandidate}
+                onClose={() => {
+                  setIsAddModalOpen(false);
+                  setEditingCandidate(null);
+                }}
               />
             )}
           </>
@@ -140,4 +178,4 @@ export const App: React.FC = () => {
   );
 };
 
-export default App;
+export default App;
