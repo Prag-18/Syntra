@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, String, Integer, Text, Boolean, DateTime, ForeignKey, Numeric, CheckConstraint
 from sqlalchemy.dialects.postgresql import UUID, ARRAY, JSONB
 from sqlalchemy.orm import declarative_base, relationship
@@ -30,8 +30,8 @@ class CandidateModel(Base):
     source = Column(String(100), default="direct")
     needs_assessment = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     def to_dict(self):
         return {
@@ -64,7 +64,7 @@ class JobDescriptionModel(Base):
     must_have_skills = Column(ARRAY(Text), default=[])
     nice_to_have_skills = Column(ARRAY(Text), default=[])
     status = Column(String(50), default="active")
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     def to_dict(self):
         return {
@@ -89,7 +89,7 @@ class RankingRunModel(Base):
     phase3_scores = Column(JSONB, nullable=False, default=dict)
     status = Column(String(50), nullable=False, default="pending")
     duration_ms = Column(Integer, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     job_description = relationship("JobDescriptionModel", backref="ranking_runs")
 
@@ -122,7 +122,7 @@ class RankedResultModel(Base):
     dim_leadership = Column(Numeric(5, 2), nullable=True)
     dim_domain = Column(Numeric(5, 2), nullable=True)
     dim_communication = Column(Numeric(5, 2), nullable=True)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     run = relationship("RankingRunModel", backref="ranked_results")
     candidate = relationship("CandidateModel", backref="ranked_results")
@@ -161,7 +161,7 @@ class RecruiterFeedbackModel(Base):
     candidate_id = Column(UUID(as_uuid=True), ForeignKey("candidates.id", ondelete="CASCADE"), nullable=False)
     decision = Column(String(20), nullable=False)
     notes = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     candidate = relationship("CandidateModel", backref="feedback_entries")
     ranking_run = relationship("RankingRunModel", backref="feedback_entries")

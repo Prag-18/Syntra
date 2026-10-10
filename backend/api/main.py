@@ -3,8 +3,9 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import time
+import traceback
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -219,7 +220,7 @@ def update_candidate(
     if not cand:
         raise HTTPException(status_code=404, detail=f"Candidate not found: '{candidate_id}'")
 
-    update_data = req.dict(exclude_unset=True)
+    update_data = req.model_dump(exclude_unset=True)
 
     if "system_design_score" in update_data:
         cand.system_design_score = _validate_score_value(update_data["system_design_score"], "system_design_score")
@@ -239,7 +240,7 @@ def update_candidate(
     else:
         cand.needs_assessment = True
 
-    cand.updated_at = datetime.utcnow()
+    cand.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(cand)
 
@@ -652,6 +653,8 @@ async def rank_candidates(req: RankRequest, db: Session = Depends(get_db)):
         }
 
     except Exception as e:
+        tb_str = traceback.format_exc()
+        logger.error(f"Pipeline execution failed: {type(e).__name__}: {e}\n{tb_str}")
         db.rollback()
         duration_ms = int((time.time() - start_time) * 1000)
         try:
@@ -663,4 +666,4 @@ async def rank_candidates(req: RankRequest, db: Session = Depends(get_db)):
         except Exception:
             db.rollback()
 
-        raise HTTPException(status_code=500, detail=f"Pipeline execution failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Ranking pipeline encountered an internal error. Please try again.")
