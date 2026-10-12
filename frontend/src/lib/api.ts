@@ -1,4 +1,4 @@
-import { Candidate, RankedCandidate, FeedbackDecision, FeedbackResponse, CandidateFeedbackSummary } from '../types';
+import { Candidate, RankedCandidate, FeedbackDecision, FeedbackResponse, CandidateFeedbackSummary, RoleIntent, ScoringWeights } from '../types';
 import { enrichAndSort } from './scoring';
 
 const API_BASE = 'http://localhost:8000';
@@ -35,26 +35,88 @@ export async function updateCandidate(id: string, updates: Partial<Candidate>): 
   return await res.json();
 }
 
+export async function parseJD(jdText: string): Promise<RoleIntent> {
+  try {
+    const res = await fetch(`${API_BASE}/jd/parse`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jd_text: jdText })
+    });
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({ detail: `Parse failed: ${res.status}` }));
+      throw new Error(errorData.detail || `Parse failed: ${res.status}`);
+    }
+    return await res.json();
+  } catch (err) {
+    console.warn('Backend /jd/parse unavailable. Running client fallback parse.', err);
+    return {
+      must_have_skills: ['Distributed Systems', 'Python', 'Go', 'Kafka'],
+      nice_to_have_skills: ['Kubernetes', 'AWS'],
+      implicit_requirements: ['High Throughput', 'System Design'],
+      culture_signals: ['Ownership', 'Mentorship'],
+      seniority_level: 'Senior',
+      leadership_required: true,
+      communication_bar: 'High',
+      weights: {
+        skills: 0.3,
+        trajectory: 0.2,
+        leadership: 0.2,
+        domain: 0.15,
+        communication: 0.15
+      },
+      weight_rationale: {
+        skills: 'Core technical execution and architectural knowledge required.',
+        trajectory: 'Senior level tenure and career progression aligned with role.',
+        leadership: 'Mentorship and technical leadership needed for team growth.',
+        domain: 'Domain depth in payments and distributed high-throughput systems.',
+        communication: 'Clear stakeholder communication and cross-team alignment.'
+      }
+    };
+  }
+}
+
 export async function rankCandidates(
   jdText: string,
-  candidates: Candidate[]
-): Promise<{ rankings: RankedCandidate[]; duration_ms: number; run_id?: string }> {
+  candidates: Candidate[],
+  jdId?: string,
+  weights?: ScoringWeights
+): Promise<{
+  rankings: RankedCandidate[];
+  duration_ms: number;
+  run_id?: string;
+  applied_weights?: ScoringWeights;
+  ai_weights?: ScoringWeights;
+  weights_overridden?: boolean;
+}> {
   try {
+    const payload: any = { candidates };
+    if (jdId) payload.jd_id = jdId;
+    if (jdText) payload.jd_text = jdText;
+    if (weights) payload.weights = weights;
+
     const res = await fetch(`${API_BASE}/rank`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jd_text: jdText, candidates })
+      body: JSON.stringify(payload)
     });
 
     if (!res.ok) throw new Error(`HTTP Error: ${res.status}`);
     const data = await res.json();
-    return { rankings: data.rankings, duration_ms: data.duration_ms, run_id: data.run_id };
+    return {
+      rankings: data.rankings,
+      duration_ms: data.duration_ms,
+      run_id: data.run_id,
+      applied_weights: data.applied_weights,
+      ai_weights: data.ai_weights,
+      weights_overridden: data.weights_overridden
+    };
   } catch (err) {
     console.warn('Backend endpoint unavailable. Running client fallback calculation.', err);
     const start = performance.now();
     await new Promise((r) => setTimeout(r, 1200));
-    
-    const sorted = enrichAndSort(candidates);
+
+    const effectiveWeights = weights || { skills: 0.3, trajectory: 0.2, leadership: 0.2, domain: 0.15, communication: 0.15 };
+    const sorted = enrichAndSort(candidates, effectiveWeights);
     const duration_ms = Math.round(performance.now() - start);
 
     const rankings: RankedCandidate[] = sorted.map((c, idx) => ({
@@ -63,19 +125,29 @@ export async function rankCandidates(
       full_name: c.full_name,
       composite_score: c.composite_score,
       tier: c.tier,
+      tier_cap_note: c.tier_cap_note,
       headline: `${c.current_role} at ${c.company} with ${c.years_experience} yrs experience`,
       rationale: `${c.full_name} scores ${c.composite_score}/100. Strong technical foundation in ${c.skills.slice(0, 3).join(', ')} aligned with role requirements.`,
       key_strengths: [c.skills[0] || 'Technical depth', 'Domain Experience', 'Problem Solving'],
-      key_risks: ['Validate scalability exposure', 'Confirm communication clarity'],
+      key_risks: c.needs_assessment
+        ? ['Technical skills unverified pending formal assessment', 'Validate tenure']
+        : ['Validate scalability exposure', 'Confirm communication clarity'],
       interview_questions: [
         `How have you structured systems at ${c.company}?`,
         `Describe a scenario where you made trade-offs between delivery speed and system debt.`,
         `How do you approach mentoring junior team members?`
       ],
-      dim_scores: c.dim_scores
+      dim_scores: c.dim_scores,
+      needs_assessment: c.needs_assessment
     }));
 
-    return { rankings, duration_ms };
+    return {
+      rankings,
+      duration_ms,
+      applied_weights: effectiveWeights,
+      ai_weights: effectiveWeights,
+      weights_overridden: false
+    };
   }
 }
 

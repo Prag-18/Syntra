@@ -2,6 +2,7 @@ import json
 import logging
 import httpx
 from core.config import GEMINI_API_KEY, GEMINI_API_URL, MAX_TOKENS
+from core.candidate_profiler import apply_tier_cap
 
 logger = logging.getLogger(__name__)
 
@@ -94,11 +95,17 @@ async def run_llm_ranking(shortlist: list, jd_text: str) -> list:
 
         parsed_rankings = json.loads(raw_text.strip())
 
-        # Preserve needs_assessment flag on returned items
+        # Preserve needs_assessment flag on returned items and apply tier cap
         needs_assessment_map = {str(c.get("id")): bool(c.get("needs_assessment", False)) for c in shortlist}
         for item in parsed_rankings:
             item_id = str(item.get("id", ""))
             if item_id in needs_assessment_map:
                 item["needs_assessment"] = needs_assessment_map[item_id]
+
+            is_unassessed = bool(item.get("needs_assessment", False))
+            capped_tier, cap_note = apply_tier_cap(item.get("tier", ""), is_unassessed)
+            item["tier"] = capped_tier
+            if cap_note:
+                item["tier_cap_note"] = cap_note
 
         return parsed_rankings

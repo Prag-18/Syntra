@@ -1,4 +1,6 @@
 from core.jd_intelligence import RoleIntent
+from core.candidate_profiler import apply_tier_cap
+
 
 def compute_composite_score(dim_scores: dict, weights: dict) -> float:
     score = (
@@ -10,12 +12,14 @@ def compute_composite_score(dim_scores: dict, weights: dict) -> float:
     )
     return round(score, 2)
 
+
 def assign_tier(score: float) -> str:
     if score >= 75.0:
         return "Top pick"
     elif score >= 55.0:
         return "Worth interviewing"
     return "Not recommended"
+
 
 def process_phase3(profiled_candidates: list, role_intent: RoleIntent) -> list:
     weights_dict = {
@@ -30,12 +34,20 @@ def process_phase3(profiled_candidates: list, role_intent: RoleIntent) -> list:
     for cand in profiled_candidates:
         comp_score = compute_composite_score(cand["dim_scores"], weights_dict)
         tier = assign_tier(comp_score)
-        results.append({
+        needs_assessment = bool(cand.get("needs_assessment", False))
+
+        # A3: tier cap — unassessed candidates cannot be "Top pick"
+        capped_tier, cap_note = apply_tier_cap(tier, needs_assessment)
+
+        entry = {
             **cand,
             "composite_score": comp_score,
-            "tier": tier
-        })
+            "tier": capped_tier,
+        }
+        if cap_note:
+            entry["tier_cap_note"] = cap_note
 
-    # Sort descending
+        results.append(entry)
+
     results.sort(key=lambda x: x["composite_score"], reverse=True)
     return results

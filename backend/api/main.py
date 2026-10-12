@@ -51,7 +51,9 @@ class ParseJDRequest(BaseModel):
     jd_text: str
 
 class RankRequest(BaseModel):
-    jd_text: str
+    jd_text: Optional[str] = None
+    jd_id: Optional[str] = None
+    weights: Optional[dict] = None
     candidates: Optional[List[dict]] = None
 
 class FeedbackCreateRequest(BaseModel):
@@ -431,7 +433,9 @@ def get_ranking_run_detail(run_id: str, db: Session = Depends(get_db)):
             "key_risks": res_row.key_risks or [],
             "interview_questions": res_row.interview_questions or [],
             "dim_scores": dim_scores,
-            "needs_assessment": cand.needs_assessment if cand.needs_assessment is not None else False
+            # A5: use snapshot value captured at ranking time, not live candidate state
+            "needs_assessment": bool(res_row.needs_assessment_at_rank) if res_row.needs_assessment_at_rank is not None else False
+
         })
 
     return {
@@ -442,18 +446,87 @@ def get_ranking_run_detail(run_id: str, db: Session = Depends(get_db)):
             "created_at": run.created_at.isoformat() if run.created_at else None,
             "job_description": jd.to_dict() if jd else None,
             "phase3_scores": run.phase3_scores,
+            "ai_weights": run.ai_weights,
+            "applied_weights": run.applied_weights,
+            "weights_overridden": bool(run.weights_overridden) if run.weights_overridden is not None else False,
             "rankings": rankings
         }
     }
 
+import math
 from dataclasses import asdict
+from core.jd_intelligence import ScoringWeights, RoleIntent
+
+REQUIRED_WEIGHT_KEYS = {"skills", "trajectory", "leadership", "domain", "communication"}
+
+def validate_and_normalize_weights(weights_input: dict) -> dict:
+    if not isinstance(weights_input, dict):
+        raise HTTPException(status_code=422, detail="Weights must be an object with 5 dimension keys.")
+
+    input_keys = set(weights_input.keys())
+    if input_keys != REQUIRED_WEIGHT_KEYS:
+        raise HTTPException(status_code=422, detail="Weights must contain exactly: skills, trajectory, leadership, domain, communication.")
+
+    clean_weights = {}
+    for k in REQUIRED_WEIGHT_KEYS:
+        val = weights_input[k]
+        if not isinstance(val, (int, float)) or isinstance(val, bool):
+            raise HTTPException(status_code=422, detail=f"Weight for '{k}' must be numeric.")
+        if math.isnan(val) or math.isinf(val):
+            raise HTTPException(status_code=422, detail=f"Weight for '{k}' must not be NaN or Infinity.")
+        if val < 0:
+            raise HTTPException(status_code=422, detail=f"Weight for '{k}' must be non-negative.")
+        clean_weights[k] = float(val)
+
+    total = sum(clean_weights.values())
+    if total <= 0:
+        raise HTTPException(status_code=422, detail="Weights sum must be greater than zero.")
+
+    # Normalize to sum to 1.0, preserving 0 weight as 0.0
+    normalized = {k: round(v / total, 4) for k, v in clean_weights.items()}
+    diff = round(1.0 - sum(normalized.values()), 4)
+    if diff != 0:
+        largest_key = max(normalized, key=normalized.get)
+        normalized[largest_key] = round(normalized[largest_key] + diff, 4)
+
+    return normalized
 
 @app.post("/jd/parse")
-async def parse_jd(req: ParseJDRequest):
+async def parse_jd(req: ParseJDRequest, db: Session = Depends(get_db)):
+    if not req.jd_text or not req.jd_text.strip():
+        raise HTTPException(status_code=422, detail="jd_text cannot be empty.")
     try:
-        intent = await extract_role_intent(req.jd_text)
-        return intent
+        clean_jd_text = req.jd_text.strip()
+        jd = db.query(JobDescriptionModel).filter_by(raw_text=clean_jd_text).first()
+        if not jd:
+            first_line = clean_jd_text.split("\n")[0][:80].strip() or "Untitled Role"
+            jd = JobDescriptionModel(
+                title=first_line,
+                raw_text=clean_jd_text,
+                status="active"
+            )
+            db.add(jd)
+            db.flush()
+
+        intent = await extract_role_intent(clean_jd_text)
+        intent_dict = asdict(intent)
+        jd.extracted_intent = intent_dict
+        jd.must_have_skills = intent.must_have_skills
+        jd.nice_to_have_skills = intent.nice_to_have_skills
+        if not jd.title or jd.title == "Untitled Role":
+            skill_prefix = intent.must_have_skills[0] if intent.must_have_skills else "Software"
+            jd.title = f"{intent.seniority_level} {skill_prefix} Engineer"
+        db.add(jd)
+        db.commit()
+        db.refresh(jd)
+
+        return {
+            "jd_id": str(jd.id),
+            **intent_dict
+        }
     except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to parse JD: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 def _resolve_or_create_candidate(db: Session, c_data: dict) -> CandidateModel:
@@ -506,6 +579,11 @@ def _resolve_or_create_candidate(db: Session, c_data: dict) -> CandidateModel:
 async def rank_candidates(req: RankRequest, db: Session = Depends(get_db)):
     start_time = time.time()
 
+    # Early validation of weights override if provided (fail fast with 422 before DB/LLM)
+    custom_weights = None
+    if req.weights is not None:
+        custom_weights = validate_and_normalize_weights(req.weights)
+
     # 1. Fetch Candidates if not provided in payload
     input_candidates = req.candidates
     if not input_candidates:
@@ -526,17 +604,29 @@ async def rank_candidates(req: RankRequest, db: Session = Depends(get_db)):
             candidate_db_map[str(c["id"])] = cand_model
 
     # 3. Find or create Job Description record
-    clean_jd_text = req.jd_text.strip()
-    jd = db.query(JobDescriptionModel).filter_by(raw_text=clean_jd_text).first()
-    if not jd:
-        first_line = clean_jd_text.split("\n")[0][:80].strip() or "Untitled Role"
-        jd = JobDescriptionModel(
-            title=first_line,
-            raw_text=clean_jd_text,
-            status="active"
-        )
-        db.add(jd)
-        db.flush()
+    jd = None
+    if req.jd_id:
+        try:
+            jd_uuid = uuid.UUID(req.jd_id)
+            jd = db.query(JobDescriptionModel).filter_by(id=jd_uuid).first()
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=404, detail="Invalid job description ID format.")
+        if not jd:
+            raise HTTPException(status_code=404, detail="Job description not found.")
+    else:
+        if not req.jd_text or not req.jd_text.strip():
+            raise HTTPException(status_code=422, detail="Either jd_id or jd_text must be provided.")
+        clean_jd_text = req.jd_text.strip()
+        jd = db.query(JobDescriptionModel).filter_by(raw_text=clean_jd_text).first()
+        if not jd:
+            first_line = clean_jd_text.split("\n")[0][:80].strip() or "Untitled Role"
+            jd = JobDescriptionModel(
+                title=first_line,
+                raw_text=clean_jd_text,
+                status="active"
+            )
+            db.add(jd)
+            db.flush()
 
     # 4. Initialize RankingRunModel (Option 1: status='running' committed immediately)
     run = RankingRunModel(
@@ -549,23 +639,61 @@ async def rank_candidates(req: RankRequest, db: Session = Depends(get_db)):
     db.refresh(run)
 
     try:
-        # Phase 1: Intent Extraction
-        intent = await extract_role_intent(req.jd_text)
-        intent_dict = asdict(intent)
+        # Phase 1: Intent Extraction (reuse stored if jd_id is provided and has extracted_intent)
+        if req.jd_id and jd.extracted_intent:
+            intent_dict = jd.extracted_intent
+            weights_data = intent_dict.get("weights") or {}
+            ai_weights = {
+                "skills": float(weights_data.get("skills", 0.25)),
+                "trajectory": float(weights_data.get("trajectory", 0.20)),
+                "leadership": float(weights_data.get("leadership", 0.20)),
+                "domain": float(weights_data.get("domain", 0.20)),
+                "communication": float(weights_data.get("communication", 0.15)),
+            }
+            intent = RoleIntent(
+                must_have_skills=intent_dict.get("must_have_skills", []),
+                nice_to_have_skills=intent_dict.get("nice_to_have_skills", []),
+                implicit_requirements=intent_dict.get("implicit_requirements", []),
+                culture_signals=intent_dict.get("culture_signals", []),
+                seniority_level=intent_dict.get("seniority_level", "Senior"),
+                leadership_required=intent_dict.get("leadership_required", False),
+                communication_bar=intent_dict.get("communication_bar", "High"),
+                weights=ScoringWeights(**ai_weights),
+                weight_rationale=intent_dict.get("weight_rationale") or {
+                    "skills": "", "trajectory": "", "leadership": "", "domain": "", "communication": ""
+                }
+            )
+        else:
+            text_to_extract = req.jd_text or jd.raw_text
+            intent = await extract_role_intent(text_to_extract)
+            intent_dict = asdict(intent)
+            jd.extracted_intent = intent_dict
+            jd.must_have_skills = intent.must_have_skills
+            jd.nice_to_have_skills = intent.nice_to_have_skills
+            if not jd.title or jd.title == "Untitled Role":
+                skill_prefix = intent.must_have_skills[0] if intent.must_have_skills else "Software"
+                jd.title = f"{intent.seniority_level} {skill_prefix} Engineer"
+            db.add(jd)
+            ai_weights = asdict(intent.weights)
 
-        # Update Job Description metadata with extracted intent
-        jd.extracted_intent = intent_dict
-        jd.must_have_skills = intent.must_have_skills
-        jd.nice_to_have_skills = intent.nice_to_have_skills
-        if not jd.title or jd.title == "Untitled Role":
-            skill_prefix = intent.must_have_skills[0] if intent.must_have_skills else "Software"
-            jd.title = f"{intent.seniority_level} {skill_prefix} Engineer"
-        db.add(jd)
+        # Apply weights override
+        applied_weights = custom_weights if custom_weights is not None else dict(ai_weights)
+
+        TOLERANCE = 0.001
+        weights_overridden = any(
+            abs(applied_weights[k] - ai_weights[k]) > TOLERANCE
+            for k in REQUIRED_WEIGHT_KEYS
+        )
+
+        run.ai_weights = ai_weights
+        run.applied_weights = applied_weights
+        run.weights_overridden = weights_overridden
 
         # Phase 2: Candidate Profiling
         profiled = [profile_candidate(c, intent.must_have_skills) for c in input_candidates]
 
-        # Phase 3: Semantic Matching
+        # Phase 3: Semantic Matching with applied weights
+        intent.weights = ScoringWeights(**applied_weights)
         phase3_ranked = process_phase3(profiled, intent)
 
         # Store Phase 3 snapshot on the run
@@ -586,7 +714,8 @@ async def rank_candidates(req: RankRequest, db: Session = Depends(get_db)):
 
         # Phase 4: Holistic LLM Re-Ranking (top 10 shortlist)
         llm_shortlist = phase3_ranked[:10]
-        llm_rankings = await run_llm_ranking(llm_shortlist, req.jd_text)
+        effective_jd_text = req.jd_text or (jd.raw_text if jd else "")
+        llm_rankings = await run_llm_ranking(llm_shortlist, effective_jd_text)
 
         # Handle candidates beyond top 10 (Decision D: preserve in ranked_results with Phase 3 scores)
         final_rankings = list(llm_rankings)
@@ -605,6 +734,8 @@ async def rank_candidates(req: RankRequest, db: Session = Depends(get_db)):
                     "interview_questions": [],
                     "dim_scores": c.get("dim_scores", {})
                 }
+                if c.get("tier_cap_note"):
+                    non_shortlist_item["tier_cap_note"] = c.get("tier_cap_note")
                 final_rankings.append(non_shortlist_item)
 
         # Persist ranked_results rows for each candidate
@@ -634,7 +765,8 @@ async def rank_candidates(req: RankRequest, db: Session = Depends(get_db)):
                 dim_trajectory=dim_scores.get("trajectory"),
                 dim_leadership=dim_scores.get("leadership"),
                 dim_domain=dim_scores.get("domain"),
-                dim_communication=dim_scores.get("communication")
+                dim_communication=dim_scores.get("communication"),
+                needs_assessment_at_rank=bool(cand_model.needs_assessment) if cand_model else False
             )
             db.add(result_row)
 
@@ -648,7 +780,10 @@ async def rank_candidates(req: RankRequest, db: Session = Depends(get_db)):
             "status": "success",
             "run_id": str(run.id),
             "duration_ms": duration_ms,
-            "intent": intent,
+            "intent": intent_dict,
+            "ai_weights": ai_weights,
+            "applied_weights": applied_weights,
+            "weights_overridden": weights_overridden,
             "rankings": final_rankings
         }
 
@@ -666,4 +801,4 @@ async def rank_candidates(req: RankRequest, db: Session = Depends(get_db)):
         except Exception:
             db.rollback()
 
-        raise HTTPException(status_code=500, detail="Ranking pipeline encountered an internal error. Please try again.")
+        raise HTTPException(status_code=500, detail="Ranking pipeline failed. Please try again.")

@@ -21,6 +21,17 @@ class RoleIntent:
     leadership_required: bool
     communication_bar: str
     weights: ScoringWeights
+    weight_rationale: dict = None
+
+    def __post_init__(self):
+        if self.weight_rationale is None:
+            self.weight_rationale = {
+                "skills": "",
+                "trajectory": "",
+                "leadership": "",
+                "domain": "",
+                "communication": ""
+            }
 
 async def extract_role_intent(jd_text: str) -> RoleIntent:
     prompt = f"""
@@ -40,6 +51,13 @@ async def extract_role_intent(jd_text: str) -> RoleIntent:
         "leadership": float,
         "domain": float,
         "communication": float
+      }},
+      "weight_rationale": {{
+        "skills": "string (one sentence tied to the JD context)",
+        "trajectory": "string (one sentence tied to seniority/trajectory)",
+        "leadership": "string (one sentence tied to leadership/mentorship needs)",
+        "domain": "string (one sentence tied to domain depth and industry focus)",
+        "communication": "string (one sentence tied to communication bar and stakeholder collaboration)"
       }}
     }}
     IMPORTANT: The weights must sum to exactly 1.0. Adjust weights according to role seniority and focus.
@@ -72,6 +90,15 @@ async def extract_role_intent(jd_text: str) -> RoleIntent:
         parsed = json.loads(raw_text.strip())
         
         weights = ScoringWeights(**parsed["weights"])
+        raw_rationale = parsed.get("weight_rationale") or {}
+        weight_rationale = {
+            "skills": raw_rationale.get("skills", ""),
+            "trajectory": raw_rationale.get("trajectory", ""),
+            "leadership": raw_rationale.get("leadership", ""),
+            "domain": raw_rationale.get("domain", ""),
+            "communication": raw_rationale.get("communication", "")
+        }
+
         return RoleIntent(
             must_have_skills=parsed.get("must_have_skills", []),
             nice_to_have_skills=parsed.get("nice_to_have_skills", []),
@@ -80,5 +107,6 @@ async def extract_role_intent(jd_text: str) -> RoleIntent:
             seniority_level=parsed.get("seniority_level", "Senior"),
             leadership_required=parsed.get("leadership_required", False),
             communication_bar=parsed.get("communication_bar", "High"),
-            weights=weights
+            weights=weights,
+            weight_rationale=weight_rationale
         )

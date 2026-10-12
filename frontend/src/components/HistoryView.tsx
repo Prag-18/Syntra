@@ -4,13 +4,14 @@ import {
   RankingRunDetail,
   CandidateFeedbackSummary,
   FeedbackDecision,
-  RunStatus
+  RunStatus,
+  ScoringWeights
 } from '../types';
 import { fetchRuns, fetchRunDetail, fetchFeedbackSummaries, submitFeedback } from '../lib/api';
 import { ResultsList } from './ResultsList';
 
 interface Props {
-  onLoadJdToLive: (jdText: string) => void;
+  onLoadJdToLive: (jdText: string, jdId?: string, appliedWeights?: ScoringWeights, aiWeights?: ScoringWeights) => void;
 }
 
 export const HistoryView: React.FC<Props> = ({ onLoadJdToLive }) => {
@@ -228,7 +229,12 @@ export const HistoryView: React.FC<Props> = ({ onLoadJdToLive }) => {
           {jd?.raw_text && (
             <button
               className="btn btn-primary"
-              onClick={() => onLoadJdToLive(jd.raw_text)}
+              onClick={() => onLoadJdToLive(
+                jd.raw_text,
+                jd.id,
+                runDetail.applied_weights || undefined,
+                runDetail.ai_weights || jd.extracted_intent?.weights || undefined
+              )}
               style={{ fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
             >
               ⚡ Load in Live Dashboard
@@ -309,6 +315,61 @@ export const HistoryView: React.FC<Props> = ({ onLoadJdToLive }) => {
                 {jd.raw_text}
               </pre>
             )}
+          </div>
+        )}
+
+        {/* Scoring Weights Section */}
+        {(runDetail.applied_weights || runDetail.ai_weights || jd?.extracted_intent?.weights) && (
+          <div className="card" style={{ padding: '1.25rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <h3 style={{ fontSize: '1rem', margin: 0, color: 'var(--accent-blue)' }}>Scoring Weights Configuration</h3>
+                {runDetail.weights_overridden && (
+                  <span style={{
+                    fontSize: '0.7rem',
+                    padding: '0.15rem 0.45rem',
+                    borderRadius: '4px',
+                    background: 'rgba(245, 158, 11, 0.2)',
+                    color: '#f59e0b',
+                    border: '1px solid rgba(245, 158, 11, 0.4)',
+                    fontWeight: 'bold'
+                  }}>
+                    Customized
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '0.75rem' }}>
+              {[
+                { key: 'skills', label: 'Technical Skills' },
+                { key: 'trajectory', label: 'Trajectory' },
+                { key: 'leadership', label: 'Leadership' },
+                { key: 'domain', label: 'Domain Depth' },
+                { key: 'communication', label: 'Communication' }
+              ].map(({ key, label }) => {
+                const applied = runDetail.applied_weights ? Math.round((runDetail.applied_weights as any)[key] * 100) : null;
+                const ai = runDetail.ai_weights
+                  ? Math.round((runDetail.ai_weights as any)[key] * 100)
+                  : (jd?.extracted_intent?.weights ? Math.round((jd.extracted_intent.weights as any)[key] * 100) : null);
+
+                return (
+                  <div key={key} style={{ background: '#0f172a', padding: '0.65rem 0.85rem', borderRadius: '6px', border: '1px solid #334155' }}>
+                    <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginBottom: '0.2rem' }}>{label}</div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
+                      <span style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#f1f5f9' }}>
+                        {applied !== null ? `${applied}%` : (ai !== null ? `${ai}%` : '—')}
+                      </span>
+                      {runDetail.weights_overridden && ai !== null && (
+                        <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                          (AI: {ai}%)
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 

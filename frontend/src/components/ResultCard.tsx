@@ -80,6 +80,11 @@ export const ResultCard: React.FC<Props> = ({ result, summary, onFeedback, onRec
 
         <div style={{ textAlign: 'right' }}>
           <span className={`badge ${getBadgeClass(result.tier)}`}>{result.tier}</span>
+          {result.tier_cap_note && (
+            <div style={{ fontSize: '0.68rem', color: '#f59e0b', marginTop: '0.2rem', fontStyle: 'italic' }}>
+              {result.tier_cap_note}
+            </div>
+          )}
           <div style={{ fontSize: '1.2rem', fontWeight: 'bold', marginTop: '0.2rem' }}>
             {result.composite_score} <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>/ 100</span>
           </div>

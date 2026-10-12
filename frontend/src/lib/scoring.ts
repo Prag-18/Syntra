@@ -27,8 +27,10 @@ export function scoreLeadership(mentoring: string = '', bio: string = '', public
   return Math.min(score, 100);
 }
 
-export function scoreCommunication(assessmentScore: number = 70, signals: string = '', publicPresence: string = ''): number {
-  let score = assessmentScore * 0.5 + 25;
+// A1 FIX: explicit null/undefined check — score 0 is a real result, not "missing"
+export function scoreCommunication(assessmentScore: number | null | undefined, signals: string = '', publicPresence: string = ''): number {
+  const effective = assessmentScore == null ? 60 : assessmentScore;
+  let score = effective * 0.5 + 25;
   const s = signals.toLowerCase();
   if (s.includes('dense') || s.includes('hard to parse') || s.includes('hard for non-technical')) score -= 20;
   if (s.includes('clear') || s.includes('strong') || s.includes('articulate')) score += 15;
@@ -44,26 +46,53 @@ export function scoreDomain(candidate: Candidate, keywords: string[] = ['payment
   return Math.min(score, 100);
 }
 
+/**
+ * Partial-assessment rule (mirrors backend _compute_skills_score):
+ *   both set                           → average (preserving explicit 0)
+ *   exactly one set                    → use that score alone (no padding)
+ *   neither (both null/undefined)      → domain proxy
+ * Note: needs_assessment stays true until BOTH are non-null.
+ */
+export function computeSkillsScore(
+  sysScore: number | null | undefined,
+  codingScore: number | null | undefined,
+  domainScore: number
+): number {
+  if (sysScore != null && codingScore != null) return (sysScore + codingScore) / 2;
+  if (sysScore != null) return sysScore;
+  if (codingScore != null) return codingScore;
+  return domainScore;
+}
+
+/**
+ * A3: tier cap — unassessed candidates cannot receive "Top pick".
+ */
+export function applyTierCap(tier: Tier, needsAssessment: boolean): { tier: Tier; capNote: string | null } {
+  if (needsAssessment && tier === 'Top pick') {
+    return { tier: 'Worth interviewing', capNote: 'Capped: pending assessment' };
+  }
+  return { tier, capNote: null };
+}
+
 export function enrichAndSort(
   candidates: Candidate[],
   weights: ScoringWeights = { skills: 0.3, trajectory: 0.2, leadership: 0.2, domain: 0.15, communication: 0.15 }
 ): EnrichedCandidate[] {
   const enriched = candidates.map(c => {
     const domainScore = scoreDomain(c);
-    const hasNullScores = Boolean(c.needs_assessment) || (c.system_design_score == null && c.coding_score == null);
-    const skillsScore = hasNullScores
-      ? domainScore
-      : ((c.system_design_score ?? 70) + (c.coding_score ?? 70)) / 2;
+    const needsAssessment = Boolean(c.needs_assessment);
+    const skillsScore = computeSkillsScore(c.system_design_score, c.coding_score, domainScore);
 
     const dim_scores: DimScores = {
       skills: skillsScore,
       trajectory: scoreTrajectory(c.current_role, c.years_experience, c.bio),
       leadership: scoreLeadership(c.mentoring_signals, c.bio, c.public_presence),
       domain: domainScore,
-      communication: scoreCommunication(c.communication_score ?? 70, c.communication_signals, c.public_presence)
+      // A1 FIX: pass null-safe value
+      communication: scoreCommunication(c.communication_score ?? null, c.communication_signals, c.public_presence)
     };
 
-    const composite_score = Number((
+    const raw_score = Number((
       dim_scores.skills * weights.skills +
       dim_scores.trajectory * weights.trajectory +
       dim_scores.leadership * weights.leadership +
@@ -71,11 +100,15 @@ export function enrichAndSort(
       dim_scores.communication * weights.communication
     ).toFixed(2));
 
-    let tier: Tier = 'Not recommended';
-    if (composite_score >= 75) tier = 'Top pick';
-    else if (composite_score >= 55) tier = 'Worth interviewing';
+    // A3: tier cap
+    let rawTier: Tier = 'Not recommended';
+    if (raw_score >= 75) rawTier = 'Top pick';
+    else if (raw_score >= 55) rawTier = 'Worth interviewing';
 
-    return { ...c, dim_scores, composite_score, tier };
+    const { tier, capNote } = applyTierCap(rawTier, needsAssessment);
+    const composite_score = raw_score;
+
+    return { ...c, dim_scores, composite_score, tier, ...(capNote ? { tier_cap_note: capNote } : {}) };
   });
 
   return enriched.sort((a, b) => b.composite_score - a.composite_score);

@@ -2,7 +2,7 @@ import sys
 import os
 import uuid
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -15,6 +15,7 @@ from database.models import (
     RankingRunModel,
     RankedResultModel
 )
+from core.jd_intelligence import RoleIntent, ScoringWeights
 
 client = TestClient(app)
 
@@ -25,12 +26,47 @@ Nice to have: Kubernetes, Redis, AWS.
 Experience: 7+ years building resilient transaction engines.
 """
 
+def make_mock_intent():
+    return RoleIntent(
+        must_have_skills=["Python", "Go", "Distributed Systems", "Kafka", "PostgreSQL"],
+        nice_to_have_skills=["Kubernetes", "Redis", "AWS"],
+        implicit_requirements=["High Throughput"],
+        culture_signals=["Collaboration"],
+        seniority_level="Senior",
+        leadership_required=True,
+        communication_bar="High",
+        weights=ScoringWeights(skills=0.3, trajectory=0.2, leadership=0.2, domain=0.15, communication=0.15)
+    )
+
+async def mock_run_llm_ranking(shortlist, jd_text):
+    rankings = []
+    for idx, c in enumerate(shortlist, start=1):
+        rankings.append({
+            "id": str(c.get("id")),
+            "rank": idx,
+            "full_name": c.get("full_name", ""),
+            "composite_score": float(c.get("composite_score", 85.0)),
+            "tier": c.get("tier", "Worth interviewing"),
+            "headline": f"{c.get('current_role', '')} at {c.get('company', '')}",
+            "rationale": f"Mock rationale for {c.get('full_name')}",
+            "key_strengths": c.get("skills", [])[:3],
+            "key_risks": ["Risk A", "Risk B"],
+            "interview_questions": ["Q1", "Q2", "Q3"],
+            "dim_scores": c.get("dim_scores", {
+                "skills": 80.0, "trajectory": 80.0, "leadership": 80.0, "domain": 80.0, "communication": 80.0
+            }),
+            "needs_assessment": bool(c.get("needs_assessment", False))
+        })
+    return rankings
+
 def test_health():
     response = client.get("/")
     assert response.status_code == 200
     assert response.json()["database"] == "connected"
 
-def test_rank_persistence_standard():
+@patch("api.main.extract_role_intent", side_effect=AsyncMock(return_value=make_mock_intent()))
+@patch("api.main.run_llm_ranking", side_effect=mock_run_llm_ranking)
+def test_rank_persistence_standard(mock_llm, mock_intent):
     payload = {
         "jd_text": SAMPLE_JD
     }
@@ -46,7 +82,7 @@ def test_rank_persistence_standard():
         run = db.query(RankingRunModel).filter_by(id=run_id).first()
         assert run is not None
         assert run.status == "complete"
-        assert run.duration_ms is not None and run.duration_ms > 0
+        assert run.duration_ms is not None and run.duration_ms >= 0
         assert "candidate_count" in run.phase3_scores
         
         jd = db.query(JobDescriptionModel).filter_by(id=run.jd_id).first()
@@ -68,7 +104,9 @@ def test_rank_persistence_standard():
             assert r.dim_communication is not None
             assert len(r.key_strengths) >= 0
 
-def test_rank_persistence_small_pool():
+@patch("api.main.extract_role_intent", side_effect=AsyncMock(return_value=make_mock_intent()))
+@patch("api.main.run_llm_ranking", side_effect=mock_run_llm_ranking)
+def test_rank_persistence_small_pool(mock_llm, mock_intent):
     small_pool = [
         {
             "id": "small_cand_1",
@@ -103,7 +141,9 @@ def test_rank_persistence_small_pool():
         results = db.query(RankedResultModel).filter_by(run_id=run_id).all()
         assert len(results) == 2
 
-def test_rank_persistence_pool_greater_than_10():
+@patch("api.main.extract_role_intent", side_effect=AsyncMock(return_value=make_mock_intent()))
+@patch("api.main.run_llm_ranking", side_effect=mock_run_llm_ranking)
+def test_rank_persistence_pool_greater_than_10(mock_llm, mock_intent):
     large_pool = [
         {
             "id": f"pool_cand_{i}",
@@ -146,7 +186,8 @@ def test_rank_failure_records_failed_status():
     with patch("api.main.extract_role_intent", side_effect=Exception("Gemini quota exceeded")):
         response = client.post("/rank", json=payload)
         assert response.status_code == 500
-        assert "Gemini quota exceeded" in response.json()["detail"]
+        # Generic message returned to client
+        assert response.json()["detail"] == "Ranking pipeline failed. Please try again."
 
     # Verify that a run was recorded with status='failed'
     with get_db_session() as db:

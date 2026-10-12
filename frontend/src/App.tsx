@@ -1,10 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { Candidate, RankedCandidate, PipelinePhase, FeedbackDecision, CandidateFeedbackSummary, ActiveTab } from './types';
+import {
+  Candidate,
+  RankedCandidate,
+  PipelinePhase,
+  FeedbackDecision,
+  CandidateFeedbackSummary,
+  ActiveTab,
+  ScoringWeights,
+  WeightRationale
+} from './types';
 import { SAMPLE_CANDIDATES, DEFAULT_JD } from './data/candidates';
-import { rankCandidates, submitFeedback, fetchFeedbackSummaries } from './lib/api';
+import { rankCandidates, submitFeedback, fetchFeedbackSummaries, parseJD } from './lib/api';
 import { Sidebar } from './components/Sidebar';
 import { PhaseBar } from './components/PhaseBar';
 import { JobDescriptionCard } from './components/JobDescriptionCard';
+import { ScoringWeightsPanel } from './components/ScoringWeightsPanel';
 import { CandidatePool } from './components/CandidatePool';
 import { ResultsList } from './components/ResultsList';
 import { CustomCandidateForm } from './components/CustomCandidateForm';
@@ -13,6 +23,7 @@ import { HistoryView } from './components/HistoryView';
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [jdText, setJdText] = useState(DEFAULT_JD);
+  const [jdId, setJdId] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<Candidate[]>(SAMPLE_CANDIDATES);
   const [selectedIds, setSelectedIds] = useState<string[]>(SAMPLE_CANDIDATES.map((c) => c.id));
   const [phase, setPhase] = useState<PipelinePhase>('idle');
@@ -22,6 +33,13 @@ export const App: React.FC = () => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingCandidate, setEditingCandidate] = useState<Candidate | null>(null);
   const [feedbackSummaries, setFeedbackSummaries] = useState<Record<string, CandidateFeedbackSummary>>({});
+
+  // Part B state: Scoring Weights & Rationales
+  const [aiWeights, setAiWeights] = useState<ScoringWeights | null>(null);
+  const [currentWeights, setCurrentWeights] = useState<ScoringWeights | null>(null);
+  const [rationales, setRationales] = useState<WeightRationale | undefined>(undefined);
+  const [isJdParsed, setIsJdParsed] = useState(false);
+  const [isAnalyzingJd, setIsAnalyzingJd] = useState(false);
 
   useEffect(() => {
     const loadSummaries = async () => {
@@ -75,21 +93,103 @@ export const App: React.FC = () => {
     setEditingCandidate(null);
   };
 
-  const handleRunPipeline = async () => {
-    setPhase('jd_analysis');
+  const handleJdTextChange = (newText: string) => {
+    setJdText(newText);
+    setIsJdParsed(false);
+    setJdId(null);
+  };
 
-    setTimeout(() => setPhase('profiling'), 300);
-    setTimeout(() => setPhase('matching'), 600);
-    setTimeout(() => setPhase('llm_ranking'), 900);
+  const handleAnalyzeJD = async () => {
+    if (!jdText.trim()) return;
+    setIsAnalyzingJd(true);
+    setPhase('jd_analysis');
+    try {
+      const intent = await parseJD(jdText);
+      if (intent.jd_id) setJdId(intent.jd_id);
+      setAiWeights(intent.weights);
+      setCurrentWeights(intent.weights);
+      setRationales(intent.weight_rationale);
+      setIsJdParsed(true);
+      setPhase('jd_parsed');
+    } catch (err) {
+      console.error('JD analysis failed:', err);
+      const fallbackWeights: ScoringWeights = {
+        skills: 0.3,
+        trajectory: 0.2,
+        leadership: 0.2,
+        domain: 0.15,
+        communication: 0.15
+      };
+      setAiWeights(fallbackWeights);
+      setCurrentWeights(fallbackWeights);
+      setIsJdParsed(true);
+      setPhase('jd_parsed');
+    } finally {
+      setIsAnalyzingJd(false);
+    }
+  };
+
+  const handleRunPipeline = async () => {
+    let activeJdId = jdId;
+    let activeWeights = currentWeights;
+
+    if (!isJdParsed || !activeWeights) {
+      setIsAnalyzingJd(true);
+      setPhase('jd_analysis');
+      try {
+        const intent = await parseJD(jdText);
+        activeJdId = intent.jd_id || null;
+        setJdId(activeJdId);
+        setAiWeights(intent.weights);
+        activeWeights = intent.weights;
+        setCurrentWeights(intent.weights);
+        setRationales(intent.weight_rationale);
+        setIsJdParsed(true);
+      } catch (err) {
+        console.warn('Fallback on auto-parse:', err);
+      } finally {
+        setIsAnalyzingJd(false);
+      }
+    }
+
+    // Step into Phase 2, 3, 4 without re-animating Phase 1 as running
+    setPhase('profiling');
+    setTimeout(() => setPhase('matching'), 300);
+    setTimeout(() => setPhase('llm_ranking'), 600);
 
     const pool = candidates.filter((c) => selectedIds.includes(c.id));
-    const result = await rankCandidates(jdText, pool);
+    const result = await rankCandidates(
+      jdText,
+      pool,
+      activeJdId || undefined,
+      activeWeights || undefined
+    );
 
     setRankings(result.rankings);
     setDuration(result.duration_ms);
     if (result.run_id) setCurrentRunId(result.run_id);
+    if (result.applied_weights) setCurrentWeights(result.applied_weights);
+    if (result.ai_weights && !aiWeights) setAiWeights(result.ai_weights);
     setPhase('complete');
   };
+
+  const handleResetToAI = () => {
+    if (aiWeights) {
+      setCurrentWeights({ ...aiWeights });
+    }
+  };
+
+  const isWeightsModified = Boolean(
+    aiWeights &&
+    currentWeights &&
+    (
+      Math.abs(currentWeights.skills - aiWeights.skills) > 0.005 ||
+      Math.abs(currentWeights.trajectory - aiWeights.trajectory) > 0.005 ||
+      Math.abs(currentWeights.leadership - aiWeights.leadership) > 0.005 ||
+      Math.abs(currentWeights.domain - aiWeights.domain) > 0.005 ||
+      Math.abs(currentWeights.communication - aiWeights.communication) > 0.005
+    )
+  );
 
   const handleFeedback = async (candidateId: string, decision: FeedbackDecision) => {
     const res = await submitFeedback(candidateId, decision, undefined, currentRunId || undefined);
@@ -103,8 +203,19 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleLoadJdToLive = (text: string) => {
+  const handleLoadJdToLive = (
+    text: string,
+    historyJdId?: string,
+    appliedWeights?: ScoringWeights,
+    historyAiWeights?: ScoringWeights
+  ) => {
     setJdText(text);
+    if (historyJdId) setJdId(historyJdId);
+    if (appliedWeights) setCurrentWeights(appliedWeights);
+    if (historyAiWeights) setAiWeights(historyAiWeights);
+    else if (appliedWeights) setAiWeights(appliedWeights);
+    setIsJdParsed(true);
+    setPhase('jd_parsed');
     setActiveTab('dashboard');
   };
 
@@ -126,15 +237,31 @@ export const App: React.FC = () => {
               </p>
             </header>
 
-            <PhaseBar phase={phase} />
+            <PhaseBar phase={phase} jdParsed={isJdParsed} />
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
-              <JobDescriptionCard
-                jdText={jdText}
-                onChange={setJdText}
-                onRun={handleRunPipeline}
-                isLoading={phase !== 'idle' && phase !== 'complete'}
-              />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginBottom: '1.5rem' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <JobDescriptionCard
+                  jdText={jdText}
+                  onChange={handleJdTextChange}
+                  onAnalyze={handleAnalyzeJD}
+                  isAnalyzing={isAnalyzingJd}
+                  isParsed={isJdParsed}
+                />
+
+                {isJdParsed && currentWeights && aiWeights && (
+                  <ScoringWeightsPanel
+                    aiWeights={aiWeights}
+                    currentWeights={currentWeights}
+                    rationales={rationales}
+                    isModified={isWeightsModified}
+                    isLoading={isAnalyzingJd || (phase !== 'idle' && phase !== 'jd_parsed' && phase !== 'complete')}
+                    onWeightsChange={setCurrentWeights}
+                    onResetToAI={handleResetToAI}
+                    onRunRanking={handleRunPipeline}
+                  />
+                )}
+              </div>
 
               <CandidatePool
                 candidates={candidates}

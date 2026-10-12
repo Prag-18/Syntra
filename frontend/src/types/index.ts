@@ -29,6 +29,7 @@ export interface EnrichedCandidate extends Candidate {
   dim_scores: DimScores;
   composite_score: number;
   tier: Tier;
+  tier_cap_note?: string | null;
 }
 
 export type Tier = 'Top pick' | 'Worth interviewing' | 'Not recommended';
@@ -46,9 +47,10 @@ export interface RankedCandidate {
   interview_questions: string[];
   dim_scores: DimScores;
   needs_assessment?: boolean;
+  tier_cap_note?: string | null;
 }
 
-export type PipelinePhase = 'idle' | 'jd_analysis' | 'profiling' | 'matching' | 'llm_ranking' | 'complete';
+export type PipelinePhase = 'idle' | 'jd_analysis' | 'jd_parsed' | 'profiling' | 'matching' | 'llm_ranking' | 'complete';
 
 export type FeedbackDecision = 'accept' | 'maybe' | 'reject';
 
@@ -101,6 +103,27 @@ export interface RunsListResponse {
   offset: number;
 }
 
+export interface WeightRationale {
+  skills: string;
+  trajectory: string;
+  leadership: string;
+  domain: string;
+  communication: string;
+}
+
+export interface RoleIntent {
+  jd_id?: string;
+  must_have_skills: string[];
+  nice_to_have_skills: string[];
+  implicit_requirements: string[];
+  culture_signals: string[];
+  seniority_level: string;
+  leadership_required: boolean;
+  communication_bar: string;
+  weights: ScoringWeights;
+  weight_rationale?: WeightRationale;
+}
+
 export interface JobDescriptionDetail {
   id: string;
   title: string;
@@ -114,6 +137,7 @@ export interface JobDescriptionDetail {
     leadership_required?: boolean;
     communication_bar?: string;
     weights?: ScoringWeights;
+    weight_rationale?: WeightRationale;
   } | null;
   must_have_skills?: string[];
   nice_to_have_skills?: string[];
@@ -128,6 +152,9 @@ export interface RankingRunDetail {
   created_at: string;
   job_description: JobDescriptionDetail | null;
   phase3_scores?: Record<string, any>;
+  ai_weights?: ScoringWeights | null;
+  applied_weights?: ScoringWeights | null;
+  weights_overridden?: boolean;
   rankings: RankedCandidate[];
 }
 

@@ -264,3 +264,163 @@ def test_profiler_uses_real_scores_after_flag_flip():
     # (90 + 80) / 2 = 85.0 (no longer falls back to domain_score)
     assert profiled_assessed["dim_scores"]["skills"] == 85.0
     assert profiled_assessed["dim_scores"]["skills"] != domain_score
+
+
+def test_zero_scores_preserved_in_profiler():
+    from core.candidate_profiler import calculate_communication, _compute_skills_score
+    # communication score 0 should be 0 * 0.5 + 25 = 25.0, NOT 60 * 0.5 + 25 = 55.0
+    assert calculate_communication(0, "", "") == 25.0
+    # None communication score defaults to 60.0 * 0.5 + 25 = 55.0
+    assert calculate_communication(None, "", "") == 55.0
+
+    # Skills dimension with zeros: (0 + 0) / 2 = 0.0
+    assert _compute_skills_score(0, 0, 80.0) == 0.0
+    # Single zero score preserved
+    assert _compute_skills_score(0, None, 80.0) == 0.0
+    assert _compute_skills_score(None, 0, 80.0) == 0.0
+
+
+def test_partial_assessment_skills_behavior():
+    from core.candidate_profiler import _compute_skills_score
+    # Two scores: average
+    assert _compute_skills_score(80, 90, 50.0) == 85.0
+    # Exactly one score: use that one score
+    assert _compute_skills_score(80, None, 50.0) == 80.0
+    assert _compute_skills_score(None, 95, 50.0) == 95.0
+    # Neither score: fall back to domain depth proxy
+    assert _compute_skills_score(None, None, 50.0) == 50.0
+
+
+def test_tier_cap_and_order_unchanged():
+    from core.candidate_profiler import apply_tier_cap
+    from core.semantic_matcher import process_phase3
+    from core.jd_intelligence import RoleIntent, ScoringWeights
+
+    # Tier cap direct function
+    assert apply_tier_cap("Top pick", True) == ("Worth interviewing", "Capped: pending assessment")
+    assert apply_tier_cap("Top pick", False) == ("Top pick", None)
+    assert apply_tier_cap("Worth interviewing", True) == ("Worth interviewing", None)
+
+    # In process_phase3: ensure composite score and order are unchanged
+    weights = ScoringWeights(skills=0.3, trajectory=0.2, leadership=0.2, domain=0.15, communication=0.15)
+    intent = RoleIntent(
+        must_have_skills=["Python"],
+        nice_to_have_skills=[],
+        implicit_requirements=[],
+        culture_signals=[],
+        seniority_level="Senior",
+        leadership_required=False,
+        communication_bar="High",
+        weights=weights
+    )
+
+    c1 = {
+        "id": "c1",
+        "full_name": "High Unassessed",
+        "dim_scores": {"skills": 95, "trajectory": 95, "leadership": 95, "domain": 95, "communication": 95},
+        "needs_assessment": True
+    }
+    c2 = {
+        "id": "c2",
+        "full_name": "Medium Assessed",
+        "dim_scores": {"skills": 70, "trajectory": 70, "leadership": 70, "domain": 70, "communication": 70},
+        "needs_assessment": False
+    }
+
+    results = process_phase3([c1, c2], intent)
+    assert len(results) == 2
+    # c1 still ranks first because composite_score is higher (95 vs 70)
+    assert results[0]["id"] == "c1"
+    assert results[0]["composite_score"] == 95.0
+    # but c1 is capped from 'Top pick' to 'Worth interviewing'
+    assert results[0]["tier"] == "Worth interviewing"
+    assert results[0]["tier_cap_note"] == "Capped: pending assessment"
+
+    # c2 is 'Worth interviewing' without note
+    assert results[1]["id"] == "c2"
+    assert results[1]["tier"] == "Worth interviewing"
+    assert "tier_cap_note" not in results[1]
+
+
+def test_clearing_score_flips_flag_to_true():
+    cand = CandidateModel(
+        full_name="Clearing Score Candidate",
+        current_role="Staff Engineer",
+        company="Stripe",
+        system_design_score=90,
+        coding_score=90,
+        needs_assessment=False
+    )
+    with get_db_session() as db:
+        db.add(cand)
+        db.flush()
+        cand_id = str(cand.id)
+
+    # Clear one of the scores
+    res = client.put(f"/candidates/{cand_id}", json={"coding_score": None})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["coding_score"] is None
+    assert data["system_design_score"] == 90
+    assert data["needs_assessment"] is True
+
+
+def test_history_uses_snapshot_after_candidate_assessed_later():
+    # 1. Create a candidate with needs_assessment=True
+    cand = CandidateModel(
+        full_name="Snapshot History Candidate",
+        current_role="Senior Backend",
+        company="Uber",
+        needs_assessment=True
+    )
+    with get_db_session() as db:
+        db.add(cand)
+        db.flush()
+        cand_id = str(cand.id)
+
+    # 2. Mock ranking run storing candidate in ranked_results with snapshot
+    from database.models import RankingRunModel, RankedResultModel, JobDescriptionModel
+    with get_db_session() as db:
+        jd = JobDescriptionModel(
+            title="Backend Engineer",
+            raw_text="Test JD",
+            must_have_skills=["Go"],
+            extracted_intent={}
+        )
+        db.add(jd)
+        db.flush()
+
+        run = RankingRunModel(
+            jd_id=jd.id,
+            phase3_scores={},
+            status="complete"
+        )
+        db.add(run)
+        db.flush()
+
+        result_row = RankedResultModel(
+            run_id=run.id,
+            candidate_id=uuid.UUID(cand_id),
+            final_rank=1,
+            composite_score=80.0,
+            tier="Worth interviewing",
+            headline="Backend Lead",
+            rationale="Strong background",
+            needs_assessment_at_rank=True
+        )
+        db.add(result_row)
+        db.flush()
+        run_id = str(run.id)
+
+    # 3. Candidate later completes assessment and sets scores
+    put_res = client.put(f"/candidates/{cand_id}", json={"system_design_score": 90, "coding_score": 90})
+    assert put_res.status_code == 200
+    assert put_res.json()["needs_assessment"] is False
+
+    # 4. GET /runs/{run_id} MUST still report needs_assessment=True because of snapshot!
+    get_run_res = client.get(f"/runs/{run_id}")
+    assert get_run_res.status_code == 200
+    run_data = get_run_res.json()
+    assert len(run_data["run"]["rankings"]) == 1
+    # Snapshot value preserved
+    assert run_data["run"]["rankings"][0]["needs_assessment"] is True

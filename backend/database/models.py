@@ -89,6 +89,9 @@ class RankingRunModel(Base):
     phase3_scores = Column(JSONB, nullable=False, default=dict)
     status = Column(String(50), nullable=False, default="pending")
     duration_ms = Column(Integer, nullable=True)
+    ai_weights = Column(JSONB, nullable=True)
+    applied_weights = Column(JSONB, nullable=True)
+    weights_overridden = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     job_description = relationship("JobDescriptionModel", backref="ranking_runs")
@@ -100,6 +103,9 @@ class RankingRunModel(Base):
             "phase3_scores": self.phase3_scores,
             "status": self.status,
             "duration_ms": self.duration_ms,
+            "ai_weights": self.ai_weights,
+            "applied_weights": self.applied_weights,
+            "weights_overridden": bool(self.weights_overridden) if self.weights_overridden is not None else False,
             "created_at": self.created_at.isoformat() if self.created_at else None
         }
 
@@ -122,6 +128,7 @@ class RankedResultModel(Base):
     dim_leadership = Column(Numeric(5, 2), nullable=True)
     dim_domain = Column(Numeric(5, 2), nullable=True)
     dim_communication = Column(Numeric(5, 2), nullable=True)
+    needs_assessment_at_rank = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     run = relationship("RankingRunModel", backref="ranked_results")
@@ -147,6 +154,7 @@ class RankedResultModel(Base):
                 "domain": float(self.dim_domain) if self.dim_domain is not None else 0.0,
                 "communication": float(self.dim_communication) if self.dim_communication is not None else 0.0,
             },
+            "needs_assessment_at_rank": bool(self.needs_assessment_at_rank) if self.needs_assessment_at_rank is not None else False,
             "created_at": self.created_at.isoformat() if self.created_at else None
         }
 

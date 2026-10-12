@@ -77,6 +77,9 @@ CREATE TABLE ranking_runs (
     phase3_scores JSONB NOT NULL,
     status VARCHAR(50) NOT NULL CHECK (status IN ('pending', 'running', 'complete', 'failed')),
     duration_ms INT,
+    ai_weights JSONB,
+    applied_weights JSONB,
+    weights_overridden BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -98,6 +101,7 @@ CREATE TABLE ranked_results (
     dim_leadership NUMERIC(5,2),
     dim_domain NUMERIC(5,2),
     dim_communication NUMERIC(5,2),
+    needs_assessment_at_rank BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
